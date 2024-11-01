@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from .workspace import WorkspacePanel
 from .queue_panel import QueuePanel
+from .edit_panel import EditPanel
 from ..utils.image_processor import ImageProcessor
 import os
 
@@ -55,14 +56,18 @@ class MainWindow(QMainWindow):
         self.workspace = WorkspacePanel()
         left_layout.addWidget(self.workspace)
         
-        # Rechte Seite (Queue)
+        # Rechte Seite (Queue und Edit Panel)
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         
-        # Queue
+        # Queue und Edit Panel erstellen
         self.queue = QueuePanel()
+        self.edit_panel = EditPanel()
+        
+        # Edit Panel und Queue zum rechten Layout hinzufügen
+        right_layout.addWidget(self.edit_panel)
         right_layout.addWidget(self.queue)
         
         # Mittlerer Bereich für den "Zur Queue" Button
@@ -106,38 +111,43 @@ class MainWindow(QMainWindow):
         # Verbindungen
         self.workspace.images_added.connect(self.add_images_to_queue)
         self.queue.process_started.connect(self.process_images)
-    
+        self.edit_panel.adjustments_changed.connect(self.queue.apply_adjustments)
+        self.edit_panel.rotation_changed.connect(self.queue.apply_rotation)
+        self.edit_panel.flip_changed.connect(self.queue.apply_flip)
+        self.edit_panel.format_changed.connect(lambda fmt: self.queue.update_format(fmt))
+        self.edit_panel.size_changed.connect(lambda size: self.queue.update_size(size))
+        self.edit_panel.compression_changed.connect(lambda v: self.queue.update_compression(v))
+        
     def add_images_to_queue(self, image_paths):
         for path in image_paths:
             self.queue.add_image(path)
     
     def process_images(self):
+        """Verarbeitet die Bilder in der Queue"""
         if self.queue.queue_list.count() == 0:
+            QMessageBox.warning(self, "Warnung", "Die Queue ist leer.")
             return
-            
-        # Ausgabeordner wählen
+
+        # Output-Verzeichnis wählen
         output_dir = QFileDialog.getExistingDirectory(
-            self, "Ausgabeordner wählen")
+            self,
+            "Ausgabeverzeichnis wählen",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
         if not output_dir:
             return
-            
+
         # Dateinamen-Template
-        filename_template, ok = QInputDialog.getText(
-            self, 
-            "Dateinamen-Format",
-            "Gib ein Dateinamen-Template ein (z.B. optimized_{filename}):\n"
-            "{filename} wird durch den originalen Dateinamen ersetzt",
-            text="optimized_{filename}"
-        )
-        if not ok:
-            return
-        
+        filename_template = "{filename}"
+
         # Progress Dialog
         progress = QProgressDialog(
             "Verarbeite Bilder...", 
             "Abbrechen", 
             0, 
-            self.queue.queue_list.count(), 
+            self.queue.queue_list.count(),
             self
         )
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -148,7 +158,19 @@ class MainWindow(QMainWindow):
             if progress.wasCanceled():
                 break
             
-            input_path = self.queue.queue_list.item(i).text()
+            # Hole das aktuelle Item und Widget
+            item = self.queue.queue_list.item(i)
+            widget = self.queue.queue_list.itemWidget(item)
+            
+            if not widget or not widget.filepath:
+                continue
+            
+            input_path = widget.filepath
+            
+            if input_path not in self.queue.image_options:
+                print(f"Keine Optionen gefunden für: {input_path}")
+                continue
+            
             options = self.queue.image_options[input_path]
             
             # Ausgabedateiname erstellen
@@ -161,7 +183,7 @@ class MainWindow(QMainWindow):
             )
             
             # Bild verarbeiten
-            success, error = ImageProcessor.optimize_image(
+            success, error, _ = ImageProcessor.optimize_image(
                 input_path,
                 output_path,
                 options
@@ -174,17 +196,17 @@ class MainWindow(QMainWindow):
         
         progress.close()
         
-        # Ergebnisbericht
+        # Zeige Ergebnisse
         if failed_images:
-            error_msg = "Folgende Bilder konnten nicht verarbeitet werden:\n\n"
+            error_message = "Folgende Bilder konnten nicht verarbeitet werden:\n\n"
             for filename, error in failed_images:
-                error_msg += f"• {filename}: {error}\n"
-            QMessageBox.warning(self, "Fehler bei der Verarbeitung", error_msg)
+                error_message += f"- {filename}: {error}\n"
+            QMessageBox.warning(self, "Fehler bei der Verarbeitung", error_message)
         else:
             QMessageBox.information(
-                self,
-                "Erfolg",
-                f"Alle Bilder wurden erfolgreich verarbeitet und in\n{output_dir}\ngespeichert!"
+                self, 
+                "Verarbeitung abgeschlossen",
+                "Alle Bilder wurden erfolgreich verarbeitet."
             )
 
     def add_selected_to_queue(self):
@@ -213,3 +235,12 @@ class MainWindow(QMainWindow):
                 f"{added_count} Bilder zur Queue hinzugefügt.\n"
                 f"{already_in_queue} Bilder waren bereits in der Queue."
             )
+
+    def update_image_options(self, adjustments):
+        """Aktualisiert die Bildoptionen für ausgewählte Bilder in der Queue"""
+        for i in range(self.queue.queue_list.count()):
+            item = self.queue.queue_list.item(i)
+            if item.isSelected():
+                path = item.text()
+                if path in self.queue.image_options:
+                    self.queue.image_options[path]['adjustments'] = adjustments

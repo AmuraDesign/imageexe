@@ -114,8 +114,8 @@ class ImageTile(QFrame):
     def enterEvent(self, event):
         if not self.selected:
             self.setStyleSheet("""
-                ImageTile {
-                    background-color: rgba(255, 68, 68, 0.1);  # Leichtes Rot beim Hover
+                QFrame {
+                    background-color: rgba(255, 68, 68, 0.1);
                     border-radius: 8px;
                 }
             """)
@@ -123,8 +123,9 @@ class ImageTile(QFrame):
     def leaveEvent(self, event):
         if not self.selected:
             self.setStyleSheet("""
-                ImageTile {
+                QFrame {
                     background-color: transparent;
+                    border-radius: 8px;
                 }
             """)
 

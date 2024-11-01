@@ -1,12 +1,13 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QListWidget, QLabel, QDialog, QComboBox, 
                             QSpinBox, QFormLayout, QMessageBox, QMenu,
-                            QCheckBox, QSlider, QSizePolicy)
+                            QCheckBox, QSlider, QSizePolicy, QListWidgetItem)
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from .preview_window import ImageComparisonWidget
 from io import BytesIO
 from ..utils.image_processor import ImageProcessor
+from datetime import datetime, timedelta
 import os
 
 class GlobalOptionsDialog(QDialog):
@@ -75,26 +76,94 @@ class GlobalOptionsDialog(QDialog):
         buttons_layout.addWidget(cancel_button)
         layout.addRow(buttons_layout)
 
+class ProcessingStats(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Statistik-Labels
+        self.current_file = QLabel("Aktuelle Datei: -")
+        self.progress = QLabel("Fortschritt: 0/0")
+        self.time_elapsed = QLabel("Vergangene Zeit: 00:00:00")
+        self.time_remaining = QLabel("Geschätzte Restzeit: --:--:--")
+        self.total_saved = QLabel("Gespeicherte Größe: 0 KB")
+        
+        for label in [self.current_file, self.progress, self.time_elapsed,
+                     self.time_remaining, self.total_saved]:
+            layout.addWidget(label)
+    
+    def update_stats(self, current_file, processed, total, start_time, saved_size):
+        self.current_file.setText(f"Aktuelle Datei: {os.path.basename(current_file)}")
+        self.progress.setText(f"Fortschritt: {processed}/{total}")
+        
+        elapsed = datetime.now() - start_time
+        self.time_elapsed.setText(f"Vergangene Zeit: {str(elapsed).split('.')[0]}")
+        
+        if processed > 0:
+            avg_time_per_file = elapsed.total_seconds() / processed
+            remaining_files = total - processed
+            estimated_remaining = timedelta(seconds=avg_time_per_file * remaining_files)
+            self.time_remaining.setText(f"Geschätzte Restzeit: {str(estimated_remaining).split('.')[0]}")
+        
+        self.total_saved.setText(f"Gespeicherte Größe: {saved_size/1024/1024:.1f} MB")
+
+class QueueListItem(QWidget):
+    def __init__(self, filepath, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(10)
+        
+        self.checkbox = QCheckBox()
+        # Zeige nur den Dateinamen, nicht den ganzen Pfad
+        self.label = QLabel(os.path.basename(filepath))
+        self.filepath = filepath
+        
+        # Styling für bessere Lesbarkeit
+        self.label.setStyleSheet("""
+            QLabel {
+                color: palette(text);
+                padding: 2px;
+            }
+        """)
+        
+        # Tooltip mit vollständigem Pfad
+        self.label.setToolTip(filepath)
+        
+        layout.addWidget(self.checkbox)
+        layout.addWidget(self.label, 1)  # 1 für stretch factor
+
 class QueuePanel(QWidget):
     process_started = pyqtSignal()
     
     def __init__(self):
         super().__init__()
-        self.init_ui()
         self.image_options = {}
-        self.global_options = {
+        self.current_preview_path = None
+        self.current_settings = {
             'format': 'WEBP',
             'width': 0,
             'height': 0,
-            'compression': 85
+            'compression': 85,
+            'adjustments': {
+                'brightness': 1.0,
+                'contrast': 1.0,
+                'saturation': 1.0
+            },
+            'rotation': 0,
+            'flip': None
         }
+        self.init_ui()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
-        # Header section with title and options
+        # Header section with title only (removed options button)
         header = QWidget()
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 5, 10, 5)
@@ -109,40 +178,38 @@ class QueuePanel(QWidget):
             }
         """)
         header_layout.addWidget(title)
-        
-        # Options Button
-        self.options_btn = QPushButton("Globale Optionen")
-        self.options_btn.setStyleSheet("""
-            QPushButton {
-                color: palette(text);
-                background-color: palette(button);
-                padding: 6px 12px;
-                border: 1px solid palette(mid);
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: palette(midlight);
-            }
-        """)
-        header_layout.addWidget(self.options_btn)
         layout.addWidget(header)
         
-        # Queue List
+        # Toolbar über der Liste
+        queue_toolbar = QHBoxLayout()
+        self.select_all_btn = QPushButton("Alle auswählen")
+        self.select_all_btn.clicked.connect(self.toggle_select_all)
+        self.apply_to_selected_btn = QPushButton("Auf Ausgewählte anwenden")
+        self.apply_to_selected_btn.clicked.connect(self.apply_settings_to_selected)
+        
+        queue_toolbar.addWidget(self.select_all_btn)
+        queue_toolbar.addWidget(self.apply_to_selected_btn)
+        queue_toolbar.addStretch()
+        layout.addLayout(queue_toolbar)
+        
+        # Queue List mit Checkboxen
         self.queue_list = QListWidget()
         self.queue_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid palette(mid);
                 border-radius: 4px;
                 background-color: palette(base);
-                color: palette(text);
+                padding: 5px;
             }
             QListWidget::item {
-                padding: 5px;
                 border-bottom: 1px solid palette(mid);
+                padding: 5px;
+                margin: 2px 0;
             }
             QListWidget::item:selected {
                 background-color: palette(highlight);
                 color: palette(highlighted-text);
+                border-radius: 3px;
             }
             QListWidget::item:hover {
                 background-color: palette(midlight);
@@ -150,7 +217,17 @@ class QueuePanel(QWidget):
         """)
         self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_list.customContextMenuRequested.connect(self.show_context_menu)
+        self.queue_list.currentItemChanged.connect(self.update_preview)
         layout.addWidget(self.queue_list)
+        
+        # Vorschau-Widget
+        self.preview = ImageComparisonWidget()
+        self.preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        self.preview.setMinimumHeight(300)
+        layout.addWidget(self.preview)
         
         # Bottom toolbar with action buttons
         toolbar = QWidget()
@@ -200,21 +277,8 @@ class QueuePanel(QWidget):
         layout.addWidget(toolbar)
         
         # Connect signals
-        self.options_btn.clicked.connect(self.show_global_options)
         self.remove_btn.clicked.connect(self.remove_selected)
         self.start_btn.clicked.connect(self.start_processing)
-        
-        # Vorschau-Widget hinzufügen
-        self.preview = ImageComparisonWidget()
-        self.preview.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding
-        )
-        self.preview.setMinimumHeight(300)  # Minimale Höhe setzen
-        layout.addWidget(self.preview)
-        
-        # Queue-Liste Auswahl verbinden
-        self.queue_list.currentItemChanged.connect(self.update_preview)
     
     def show_context_menu(self, position):
         menu = QMenu()
@@ -228,82 +292,80 @@ class QueuePanel(QWidget):
         
         menu.exec(self.queue_list.mapToGlobal(position))
     
-    def add_image(self, image_path):
-        # Prüfen ob das Bild bereits in der Queue ist
+    def add_image(self, filepath):
+        """Fügt ein Bild zur Queue hinzu"""
+        if filepath not in [self.queue_list.itemWidget(self.queue_list.item(i)).filepath 
+                          for i in range(self.queue_list.count())]:
+            item = QListWidgetItem(self.queue_list)
+            widget = QueueListItem(filepath)
+            item.setSizeHint(widget.sizeHint())
+            self.queue_list.addItem(item)
+            self.queue_list.setItemWidget(item, widget)
+            
+            # Kopiere die aktuellen Einstellungen für dieses Bild
+            self.image_options[filepath] = self.get_current_settings()
+            return True
+        return False
+
+    def toggle_select_all(self):
+        """Wählt alle Bilder aus oder ab"""
+        select_all = self.select_all_btn.text() == "Alle auswählen"
         for i in range(self.queue_list.count()):
-            if self.queue_list.item(i).text() == image_path:
-                return False  # Bild bereits in der Queue
-        
-        self.queue_list.addItem(image_path)
-        self.image_options[image_path] = self.global_options.copy()
-        return True
-    
-    def remove_selected(self):
-        for item in self.queue_list.selectedItems():
-            path = item.text()
-            if path in self.image_options:
-                self.image_options.pop(path)
-            self.queue_list.takeItem(self.queue_list.row(item))
-    
-    def show_global_options(self):
-        dialog = GlobalOptionsDialog(self)
-        
-        # Aktuelle globale Optionen laden
-        dialog.format_combo.setCurrentText(self.global_options['format'])
-        dialog.width_spin.setValue(self.global_options['width'])
-        dialog.height_spin.setValue(self.global_options['height'])
-        dialog.compression_slider.setValue(self.global_options['compression'])
-        
-        # Verbinde Slider mit Live-Vorschau
-        dialog.compression_slider.valueChanged.connect(self.update_preview_compression)
-        
-        if dialog.exec():
-            new_options = {
-                'format': dialog.format_combo.currentText(),
-                'width': dialog.width_spin.value(),
-                'height': dialog.height_spin.value(),
-                'compression': dialog.compression_slider.value()
-            }
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            widget.checkbox.setChecked(select_all)
+        self.select_all_btn.setText("Alle abwählen" if select_all else "Alle auswählen")
+
+    def get_selected_files(self):
+        """Gibt eine Liste aller ausgewählten Dateien zurück"""
+        selected = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            if widget and widget.filepath and widget.checkbox.isChecked():
+                selected.append(widget.filepath)
+        return selected
+
+    def get_current_settings(self):
+        """Gibt die aktuellen Einstellungen zurück"""
+        return self.current_settings.copy()
+
+    def update_current_settings(self, settings_type, value):
+        """Aktualisiert die aktuellen Einstellungen"""
+        if isinstance(settings_type, dict):
+            self.current_settings.update(settings_type)
+        else:
+            if '.' in settings_type:
+                # Für verschachtelte Einstellungen wie 'adjustments.brightness'
+                main_key, sub_key = settings_type.split('.')
+                if main_key not in self.current_settings:
+                    self.current_settings[main_key] = {}
+                self.current_settings[main_key][sub_key] = value
+            else:
+                self.current_settings[settings_type] = value
+
+    def apply_settings_to_selected(self):
+        """Wendet die aktuellen Einstellungen auf alle ausgewählten Bilder an"""
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            QMessageBox.warning(self, "Warnung", 
+                              "Bitte wähle mindestens ein Bild aus.")
+            return
             
-            self.global_options = new_options
+        current_settings = self.get_current_settings()
+        
+        # Auf alle ausgewählten Bilder anwenden
+        for filepath in selected_files:
+            self.image_options[filepath].update(current_settings)
             
-            # Auf alle Bilder in der Queue anwenden
-            for i in range(self.queue_list.count()):
-                item = self.queue_list.item(i)
-                self.image_options[item.text()] = new_options.copy()
-            
-            # Aktualisiere die Vorschau mit den neuen Optionen
-            current_item = self.queue_list.currentItem()
-            if current_item:
-                self.update_preview(current_item, None)
-    
-    def update_preview_compression(self, value):
-        """Aktualisiert die Vorschau wenn sich die Kompression ändert"""
+        # Aktualisiere die Vorschau des aktuell ausgewählten Bildes
         current_item = self.queue_list.currentItem()
         if current_item:
-            # Temporär die Kompressionseinstellung ändern
-            temp_options = self.image_options[current_item.text()].copy()
-            temp_options['compression'] = value
+            self.update_preview(current_item, None)
             
-            # Vorschau mit temporären Optionen aktualisieren
-            input_path = current_item.text()
-            temp_output = BytesIO()
-            
-            success, _ = ImageProcessor.optimize_image(
-                input_path,
-                temp_output,
-                temp_options
-            )
-            
-            if success:
-                temp_output.seek(0)
-                processed_size = len(temp_output.getvalue()) / 1024
-                
-                temp_pixmap = QPixmap()
-                temp_pixmap.loadFromData(temp_output.getvalue())
-                
-                self.preview.set_images(input_path, temp_pixmap, processed_size)
-    
+        QMessageBox.information(self, "Erfolg", 
+                              f"Einstellungen auf {len(selected_files)} Bilder angewendet.")
+
     def start_processing(self):
         if self.queue_list.count() == 0:
             QMessageBox.warning(self, "Warnung", 
@@ -316,41 +378,149 @@ class QueuePanel(QWidget):
         self.image_options.clear()
     
     def update_preview(self, current, previous):
-        """Aktualisiert die Vorschau wenn ein Bild in der Queue ausgewählt wird"""
+        """Wird aufgerufen, wenn ein neues Bild in der Queue ausgewählt wird"""
         if not current:
             self.preview.setVisible(False)
+            self.current_preview_path = None
             return
             
-        input_path = current.text()
-        print(f"Versuche Bild zu laden: {input_path}")  # Debug
+        widget = self.queue_list.itemWidget(current)
+        if not widget:
+            return
+
+        input_path = widget.filepath
+        self.current_preview_path = input_path
+        print(f"Versuche Bild zu laden: {input_path}")
         
+        # Lade die spezifischen Einstellungen für dieses Bild
+        if input_path in self.image_options:
+            # Verwende die gespeicherten Einstellungen für dieses Bild
+            self.update_preview_with_options(self.image_options[input_path])
+        else:
+            # Verwende die Standard-Einstellungen
+            self.image_options[input_path] = self.get_current_settings()
+            self.update_preview_with_options()
+
+    def update_preview_with_options(self, options=None):
+        """Aktualisiert die Vorschau mit den gegebenen Optionen"""
+        if not self.current_preview_path:
+            return
+            
+        current_item = self.queue_list.currentItem()
+        if not current_item:
+            return
+
+        widget = self.queue_list.itemWidget(current_item)
+        if not widget:
+            return
+
+        input_path = widget.filepath
+        self.current_preview_path = input_path
+        
+        # Wenn keine Optionen übergeben wurden, aktuelle Optionen verwenden
+        if options is None:
+            options = self.get_current_settings()
+        else:
+            # Optionen mit den bestehenden Optionen zusammenführen
+            current_options = self.get_current_settings()
+            current_options.update(options)
+            options = current_options
+
         # Temporäres verarbeitetes Bild erstellen
         temp_output = BytesIO()
-        options = self.image_options[input_path]
         
-        success, error = ImageProcessor.optimize_image(
+        success, error, stats = ImageProcessor.optimize_image(
             input_path,
             temp_output,
             options
         )
         
         if success:
-            print("Bildoptimierung erfolgreich")  # Debug
-            # BytesIO in QPixmap konvertieren
             temp_output.seek(0)
             processed_size = len(temp_output.getvalue()) / 1024  # KB
             
             temp_pixmap = QPixmap()
             success = temp_pixmap.loadFromData(temp_output.getvalue())
-            print(f"Pixmap geladen: {success}")  # Debug
             
             if not temp_pixmap.isNull():
-                print(f"Pixmap Größe: {temp_pixmap.width()}x{temp_pixmap.height()}")  # Debug
                 self.preview.set_images(input_path, temp_pixmap, processed_size)
                 self.preview.setVisible(True)
             else:
-                print("Fehler: Pixmap ist null")  # Debug
                 self.preview.setVisible(False)
         else:
-            print(f"Bildoptimierung fehlgeschlagen: {error}")  # Debug
+            print(f"Vorschau-Aktualisierung fehlgeschlagen: {error}")
             self.preview.setVisible(False)
+
+    def apply_adjustments(self, adjustments):
+        """Wendet neue Bildanpassungen auf die Vorschau an"""
+        self.update_current_settings('adjustments', adjustments)
+        self.update_preview_with_options({'adjustments': adjustments})
+
+    def apply_rotation(self, angle):
+        """Wendet neue Rotation auf die Vorschau an"""
+        self.update_current_settings('rotation', angle)
+        self.update_preview_with_options({'rotation': angle})
+
+    def apply_flip(self, flip_type):
+        """Wendet neue Spiegelung auf die Vorschau an"""
+        self.update_current_settings('flip', flip_type)
+        self.update_preview_with_options({'flip': flip_type})
+
+    def update_format(self, format):
+        """Aktualisiert das Format"""
+        self.update_current_settings('format', format)
+        self.update_preview_with_options({'format': format})
+
+    def update_size(self, size):
+        """Aktualisiert die Größeneinstellungen"""
+        self.update_current_settings('width', size.get('width', 0))
+        self.update_current_settings('height', size.get('height', 0))
+        self.update_preview_with_options(size)
+
+    def update_compression(self, value):
+        """Aktualisiert die Kompressionseinstellung"""
+        self.update_current_settings('compression', value)
+        self.update_preview_with_options({'compression': value})
+
+    def process_images(self):
+        """Verarbeitet alle Bilder in der Queue"""
+        # Entweder alle oder nur ausgewählte Bilder verarbeiten
+        files_to_process = self.get_selected_files()
+        if not files_to_process:  # Wenn keine ausgewählt, alle verarbeiten
+            files_to_process = [self.queue_list.itemWidget(
+                self.queue_list.item(i)).filepath 
+                for i in range(self.queue_list.count())]
+        
+        if not files_to_process:
+            QMessageBox.warning(self, "Warnung", "Die Queue ist leer.")
+            return
+            
+        # ... (Rest des Verarbeitungscodes) ...
+
+    def remove_selected(self):
+        """Entfernt ausgewählte Bilder aus der Queue"""
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            QMessageBox.warning(self, "Warnung", 
+                              "Bitte wähle mindestens ein Bild aus.")
+            return
+
+        # Bilder aus der Queue und den Optionen entfernen
+        items_to_remove = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            if widget and widget.filepath in selected_files:
+                items_to_remove.append(item)
+                if widget.filepath in self.image_options:
+                    del self.image_options[widget.filepath]
+
+        # Items aus der Liste entfernen
+        for item in items_to_remove:
+            self.queue_list.takeItem(self.queue_list.row(item))
+
+        # Vorschau aktualisieren falls nötig
+        if self.queue_list.count() == 0:
+            self.preview.setVisible(False)
+        elif not self.queue_list.currentItem():
+            self.queue_list.setCurrentRow(0)
