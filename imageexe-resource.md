@@ -3,6 +3,7 @@
 Start of file:
 Directory of every file in the project
 - File: .ignorethese (not included in output)
+- File: image_processing.log (not included in output)
 - File: main.py
 - File: requirements.txt
 - Directory: src
@@ -13,11 +14,13 @@ Directory of every file in the project
 - File: src\assets\icons\right-arrow.png (not included in output)
 - File: src\assets\icons\start.png (not included in output)
 - Directory: src\ui
+- File: src\ui\edit_panel.py
 - File: src\ui\main_window.py
 - File: src\ui\preview_window.py
 - File: src\ui\queue_panel.py
 - File: src\ui\workspace.py
 - Directory: src\ui\__pycache__ (not included in output)
+- File: src\ui\__pycache__\edit_panel.cpython-312.pyc (not included in output)
 - File: src\ui\__pycache__\main_window.cpython-312.pyc (not included in output)
 - File: src\ui\__pycache__\preview_window.cpython-312.pyc (not included in output)
 - File: src\ui\__pycache__\queue_panel.cpython-312.pyc (not included in output)
@@ -64,6 +67,501 @@ pillow-heif
 
 ```
 
+### File: src\ui\edit_panel.py
+```
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                            QSlider, QPushButton, QGroupBox, QComboBox, 
+                            QSpinBox, QFormLayout, QInputDialog, QMessageBox, 
+                            QCheckBox)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
+import os
+import json
+
+class EditPanel(QWidget):
+    adjustments_changed = pyqtSignal(dict)
+    rotation_changed = pyqtSignal(int)
+    flip_changed = pyqtSignal(str)
+    format_changed = pyqtSignal(str)
+    size_changed = pyqtSignal(dict)
+    compression_changed = pyqtSignal(int)
+    
+    def __init__(self):
+        super().__init__()
+        self.current_rotation = 0
+        self.is_flipped_h = False
+        self.is_flipped_v = False
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Format und Größe
+        format_group = QGroupBox("Format & Größe")
+        format_layout = QFormLayout()
+        
+        # Format
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["WEBP", "JPEG", "PNG", "ICO"])
+        self.format_combo.currentTextChanged.connect(self.format_changed.emit)
+        format_layout.addRow("Format:", self.format_combo)
+        
+        # Größeneinstellungen Container
+        size_container = QWidget()
+        size_layout = QVBoxLayout(size_container)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Einheitenauswahl
+        unit_layout = QHBoxLayout()
+        self.size_unit = QComboBox()
+        self.size_unit.addItems(["Pixel", "%"])
+        self.size_unit.currentTextChanged.connect(self.on_unit_changed)
+        unit_layout.addWidget(QLabel("Einheit:"))
+        unit_layout.addWidget(self.size_unit)
+        unit_layout.addStretch()
+
+        # Checkbox für Seitenverhältnis
+        self.keep_aspect = QCheckBox("Seitenverhältnis beibehalten")
+        self.keep_aspect.setChecked(True)
+        unit_layout.addWidget(self.keep_aspect)
+
+        size_layout.addLayout(unit_layout)
+
+        # Breite
+        width_layout = QHBoxLayout()
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(0, 10000)
+        self.width_spin.setSpecialValueText("Original")
+        self.width_spin.valueChanged.connect(self.on_width_changed)
+        width_layout.addWidget(QLabel("Breite:"))
+        width_layout.addWidget(self.width_spin)
+        size_layout.addLayout(width_layout)
+
+        # Höhe
+        height_layout = QHBoxLayout()
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(0, 10000)
+        self.height_spin.setSpecialValueText("Original")
+        self.height_spin.valueChanged.connect(self.on_height_changed)
+        height_layout.addWidget(QLabel("Höhe:"))
+        height_layout.addWidget(self.height_spin)
+        size_layout.addLayout(height_layout)
+
+        format_layout.addRow("Größe:", size_container)
+
+        # Kompression mit angepasstem Stil
+        compression_layout = QHBoxLayout()
+        self.compression_slider = QSlider(Qt.Orientation.Horizontal)
+        self.compression_slider.setRange(0, 100)
+        self.compression_slider.setValue(85)
+        self.compression_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ff4444, stop:1 #44ff44);
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                border: 1px solid #999999;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+        """)
+        self.compression_label = QLabel("85%")
+        self.compression_slider.valueChanged.connect(
+            lambda v: (
+                self.compression_label.setText(f"{v}%"),
+                self.compression_changed.emit(v)
+            )
+        )
+        compression_layout.addWidget(QLabel("Kompression:"))
+        compression_layout.addWidget(self.compression_slider)
+        compression_layout.addWidget(self.compression_label)
+        format_layout.addRow("", compression_layout)
+
+        format_group.setLayout(format_layout)
+        layout.addWidget(format_group)
+
+        # Bildanpassungen
+        adjust_group = QGroupBox("Bildanpassungen")
+        adjust_layout = QVBoxLayout()
+        
+        # Helligkeit
+        brightness_layout = QHBoxLayout()
+        self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
+        self.brightness_slider.setRange(-100, 100)
+        self.brightness_slider.setValue(0)
+        self.brightness_slider.valueChanged.connect(self.on_adjustment_changed)
+        self.brightness_label = QLabel("0")
+        brightness_layout.addWidget(QLabel("Helligkeit:"))
+        brightness_layout.addWidget(self.brightness_slider)
+        brightness_layout.addWidget(self.brightness_label)
+        adjust_layout.addLayout(brightness_layout)
+        
+        # Kontrast
+        contrast_layout = QHBoxLayout()
+        self.contrast_slider = QSlider(Qt.Orientation.Horizontal)
+        self.contrast_slider.setRange(-100, 100)
+        self.contrast_slider.setValue(0)
+        self.contrast_slider.valueChanged.connect(self.on_adjustment_changed)
+        self.contrast_label = QLabel("0")
+        contrast_layout.addWidget(QLabel("Kontrast:"))
+        contrast_layout.addWidget(self.contrast_slider)
+        contrast_layout.addWidget(self.contrast_label)
+        adjust_layout.addLayout(contrast_layout)
+        
+        # Sättigung
+        saturation_layout = QHBoxLayout()
+        self.saturation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.saturation_slider.setRange(-100, 100)
+        self.saturation_slider.setValue(0)
+        self.saturation_slider.valueChanged.connect(self.on_adjustment_changed)
+        self.saturation_label = QLabel("0")
+        saturation_layout.addWidget(QLabel("Sättigung:"))
+        saturation_layout.addWidget(self.saturation_slider)
+        saturation_layout.addWidget(self.saturation_label)
+        adjust_layout.addLayout(saturation_layout)
+        
+        adjust_group.setLayout(adjust_layout)
+        layout.addWidget(adjust_group)
+        
+        # Transformation
+        transform_group = QGroupBox("Transformation")
+        transform_layout = QHBoxLayout()
+        
+        self.rotate_left_btn = QPushButton("↺ 90°")
+        self.rotate_right_btn = QPushButton("↻ 90°")
+        self.flip_h_btn = QPushButton("↔")
+        self.flip_v_btn = QPushButton("↕")
+        
+        self.rotate_left_btn.clicked.connect(lambda: self.rotate(-90))
+        self.rotate_right_btn.clicked.connect(lambda: self.rotate(90))
+        self.flip_h_btn.clicked.connect(lambda: self.flip('horizontal'))
+        self.flip_v_btn.clicked.connect(lambda: self.flip('vertical'))
+        
+        transform_layout.addWidget(self.rotate_left_btn)
+        transform_layout.addWidget(self.rotate_right_btn)
+        transform_layout.addWidget(self.flip_h_btn)
+        transform_layout.addWidget(self.flip_v_btn)
+        
+        transform_group.setLayout(transform_layout)
+        layout.addWidget(transform_group)
+        
+        # Vorlagen-Buttons
+        template_layout = QHBoxLayout()
+        save_template_btn = QPushButton("Aktuelle Einstellungen als Vorlage speichern")
+        load_template_btn = QPushButton("Vorlage laden")
+        
+        save_template_btn.clicked.connect(self.save_template)
+        load_template_btn.clicked.connect(self.load_template)
+        
+        template_layout.addWidget(save_template_btn)
+        template_layout.addWidget(load_template_btn)
+        layout.addLayout(template_layout)
+        
+        # Zurücksetzen Button
+        reset_btn = QPushButton("Alle Einstellungen zurücksetzen")
+        reset_btn.clicked.connect(self.reset_all)
+        layout.addWidget(reset_btn)
+        
+        layout.addStretch()
+
+    def rotate(self, angle):
+        """Rotiert das Bild um den angegebenen Winkel"""
+        self.current_rotation = (self.current_rotation + angle) % 360
+        self.rotation_changed.emit(self.current_rotation)
+
+    def flip(self, direction):
+        """Spiegelt das Bild in der angegebenen Richtung"""
+        if direction == 'horizontal':
+            self.is_flipped_h = not self.is_flipped_h
+            if self.is_flipped_h:
+                self.flip_h_btn.setStyleSheet("background-color: palette(highlight);")
+            else:
+                self.flip_h_btn.setStyleSheet("")
+        else:  # vertical
+            self.is_flipped_v = not self.is_flipped_v
+            if self.is_flipped_v:
+                self.flip_v_btn.setStyleSheet("background-color: palette(highlight);")
+            else:
+                self.flip_v_btn.setStyleSheet("")
+        
+        self.flip_changed.emit(direction)
+
+    def on_adjustment_changed(self):
+        """Wird aufgerufen, wenn sich ein Slider-Wert ändert"""
+        # Aktualisiere Labels
+        self.brightness_label.setText(str(self.brightness_slider.value()))
+        self.contrast_label.setText(str(self.contrast_slider.value()))
+        self.saturation_label.setText(str(self.saturation_slider.value()))
+        
+        adjustments = {
+            'brightness': 1.0 + (self.brightness_slider.value() / 100),
+            'contrast': 1.0 + (self.contrast_slider.value() / 100),
+            'saturation': 1.0 + (self.saturation_slider.value() / 100)
+        }
+        self.adjustments_changed.emit(adjustments)
+
+    def on_size_changed(self):
+        """Wird aufgerufen, wenn sich die Größeneinstellungen ändern"""
+        if self.updating:
+            return
+            
+        size = {
+            'width': self.width_spin.value(),
+            'height': self.height_spin.value(),
+            'unit': self.size_unit.currentText(),
+            'keep_aspect': self.keep_aspect.isChecked()
+        }
+        self.size_changed.emit(size)
+
+    def reset_all(self):
+        """Setzt alle Einstellungen zurück"""
+        # Format und Größe
+        self.format_combo.setCurrentText("WEBP")
+        self.width_spin.setValue(0)
+        self.height_spin.setValue(0)
+        self.size_unit.setCurrentText("Pixel")
+        self.keep_aspect.setChecked(True)
+        self.compression_slider.setValue(85)
+        
+        # Bildanpassungen
+        self.brightness_slider.setValue(0)
+        self.contrast_slider.setValue(0)
+        self.saturation_slider.setValue(0)
+        
+        # Transformation
+        self.current_rotation = 0
+        self.is_flipped_h = False
+        self.is_flipped_v = False
+        self.flip_h_btn.setStyleSheet("")
+        self.flip_v_btn.setStyleSheet("")
+        
+        # Signale senden
+        self.on_adjustment_changed()
+        self.on_size_changed()
+        self.rotation_changed.emit(0)
+        self.format_changed.emit("WEBP")
+        self.compression_changed.emit(85)
+
+    def save_template(self):
+        """Speichert die aktuellen Einstellungen als Vorlage"""
+        name, ok = QInputDialog.getText(
+            self, 'Vorlage speichern', 
+            'Name der Vorlage:'
+        )
+        if ok and name:
+            template = {
+                'format': self.format_combo.currentText(),
+                'width': self.width_spin.value(),
+                'height': self.height_spin.value(),
+                'compression': self.compression_slider.value(),
+                'adjustments': {
+                    'brightness': self.brightness_slider.value(),
+                    'contrast': self.contrast_slider.value(),
+                    'saturation': self.saturation_slider.value()
+                },
+                'rotation': self.current_rotation,
+                'flip_h': self.is_flipped_h,
+                'flip_v': self.is_flipped_v
+            }
+            
+            try:
+                # Erstelle templates Ordner, falls nicht vorhanden
+                templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+                os.makedirs(templates_dir, exist_ok=True)
+                
+                # Speichere Template als JSON
+                import json
+                template_path = os.path.join(templates_dir, f"{name}.json")
+                with open(template_path, 'w', encoding='utf-8') as f:
+                    json.dump(template, f, indent=4)
+                
+                QMessageBox.information(
+                    self,
+                    "Erfolg",
+                    f"Vorlage '{name}' wurde erfolgreich gespeichert."
+                )
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Fehler",
+                    f"Fehler beim Speichern der Vorlage: {str(e)}"
+                )
+
+    def load_template(self):
+        """Lädt eine gespeicherte Vorlage"""
+        try:
+            # Template-Verzeichnis
+            templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+            if not os.path.exists(templates_dir):
+                QMessageBox.warning(
+                    self,
+                    "Keine Vorlagen",
+                    "Es wurden keine gespeicherten Vorlagen gefunden."
+                )
+                return
+
+            # Liste verfügbarer Templates
+            templates = [f for f in os.listdir(templates_dir) if f.endswith('.json')]
+            if not templates:
+                QMessageBox.warning(
+                    self,
+                    "Keine Vorlagen",
+                    "Es wurden keine gespeicherten Vorlagen gefunden."
+                )
+                return
+
+            # Template auswählen
+            template_name, ok = QInputDialog.getItem(
+                self,
+                "Vorlage laden",
+                "Wähle eine Vorlage:",
+                [os.path.splitext(t)[0] for t in templates],
+                0,
+                False
+            )
+
+            if ok and template_name:
+                # Template laden und anwenden
+                import json
+                template_path = os.path.join(templates_dir, f"{template_name}.json")
+                with open(template_path, 'r', encoding='utf-8') as f:
+                    template = json.load(f)
+
+                # Einstellungen anwenden
+                self.format_combo.setCurrentText(template['format'])
+                self.width_spin.setValue(template['width'])
+                self.height_spin.setValue(template['height'])
+                self.compression_slider.setValue(template['compression'])
+                
+                # Bildanpassungen
+                self.brightness_slider.setValue(template['adjustments']['brightness'])
+                self.contrast_slider.setValue(template['adjustments']['contrast'])
+                self.saturation_slider.setValue(template['adjustments']['saturation'])
+                
+                # Transformation
+                self.current_rotation = template['rotation']
+                self.is_flipped_h = template['flip_h']
+                self.is_flipped_v = template['flip_v']
+                
+                # UI aktualisieren
+                self.on_adjustment_changed()
+                self.on_size_changed()
+                self.rotation_changed.emit(self.current_rotation)
+                self.format_changed.emit(template['format'])
+                self.compression_changed.emit(template['compression'])
+                
+                # Flip-Button-Styles aktualisieren
+                self.flip_h_btn.setStyleSheet(
+                    "background-color: palette(highlight);" if self.is_flipped_h else ""
+                )
+                self.flip_v_btn.setStyleSheet(
+                    "background-color: palette(highlight);" if self.is_flipped_v else ""
+                )
+
+                QMessageBox.information(
+                    self,
+                    "Erfolg",
+                    f"Vorlage '{template_name}' wurde erfolgreich geladen."
+                )
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Fehler",
+                f"Fehler beim Laden der Vorlage: {str(e)}"
+            )
+
+    def update_spin_ranges(self):
+        """Aktualisiert die erlaubten Bereiche der Spinboxen basierend auf der gewählten Einheit"""
+        # Breite
+        if self.size_unit.currentText() == "%":
+            self.width_spin.setRange(0, 200)  # 0-200%
+            if self.width_spin.value() > 200:
+                self.width_spin.setValue(100)
+        else:
+            self.width_spin.setRange(0, 10000)  # 0-10000px
+        
+        # Höhe
+        if self.size_unit.currentText() == "%":
+            self.height_spin.setRange(0, 200)  # 0-200%
+            if self.height_spin.value() > 200:
+                self.height_spin.setValue(100)
+        else:
+            self.height_spin.setRange(0, 10000)  # 0-10000px
+
+    def on_unit_changed(self):
+        """Wird aufgerufen, wenn sich die Einheit ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        current_unit = self.size_unit.currentText()
+        
+        if current_unit == "Pixel":
+            self.width_spin.setRange(0, 10000)
+            self.height_spin.setRange(0, 10000)
+            if self.width_spin.value() > 0:
+                self.width_spin.setValue(int(self.width_spin.value() * self.original_width / 100))
+            if self.height_spin.value() > 0:
+                self.height_spin.setValue(int(self.height_spin.value() * self.original_height / 100))
+        else:  # Prozent
+            self.width_spin.setRange(0, 200)
+            self.height_spin.setRange(0, 200)
+            if self.width_spin.value() > 0:
+                self.width_spin.setValue(int(self.width_spin.value() * 100 / self.original_width))
+            if self.height_spin.value() > 0:
+                self.height_spin.setValue(int(self.height_spin.value() * 100 / self.original_height))
+        
+        self.updating = False
+        self.on_size_changed()
+
+    def on_width_changed(self):
+        """Wird aufgerufen, wenn sich die Breite ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        if self.keep_aspect.isChecked() and self.width_spin.value() > 0:
+            if self.size_unit.currentText() == "Pixel":
+                self.height_spin.setValue(int(self.width_spin.value() / self.aspect_ratio))
+            else:
+                self.height_spin.setValue(self.width_spin.value())
+        self.updating = False
+        self.on_size_changed()
+
+    def on_height_changed(self):
+        """Wird aufgerufen, wenn sich die Höhe ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        if self.keep_aspect.isChecked() and self.height_spin.value() > 0:
+            if self.size_unit.currentText() == "Pixel":
+                self.width_spin.setValue(int(self.height_spin.value() * self.aspect_ratio))
+            else:
+                self.width_spin.setValue(self.height_spin.value())
+        self.updating = False
+        self.on_size_changed()
+
+    def set_original_size(self, width, height):
+        """Setzt die Originalgröße des Bildes"""
+        self.original_width = width
+        self.original_height = height
+        self.aspect_ratio = width / height if height else 1.0
+        
+        # Aktualisiere die Ranges basierend auf der aktuellen Einheit
+        self.on_unit_changed()
+
+```
+
 ### File: src\ui\main_window.py
 ```
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
@@ -73,6 +571,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from .workspace import WorkspacePanel
 from .queue_panel import QueuePanel
+from .edit_panel import EditPanel
 from ..utils.image_processor import ImageProcessor
 import os
 
@@ -123,14 +622,18 @@ class MainWindow(QMainWindow):
         self.workspace = WorkspacePanel()
         left_layout.addWidget(self.workspace)
         
-        # Rechte Seite (Queue)
+        # Rechte Seite (Queue und Edit Panel)
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         
-        # Queue
+        # Queue und Edit Panel erstellen
         self.queue = QueuePanel()
+        self.edit_panel = EditPanel()
+        
+        # Edit Panel und Queue zum rechten Layout hinzufügen
+        right_layout.addWidget(self.edit_panel)
         right_layout.addWidget(self.queue)
         
         # Mittlerer Bereich für den "Zur Queue" Button
@@ -174,38 +677,40 @@ class MainWindow(QMainWindow):
         # Verbindungen
         self.workspace.images_added.connect(self.add_images_to_queue)
         self.queue.process_started.connect(self.process_images)
-    
+        self.edit_panel.adjustments_changed.connect(self.queue.apply_adjustments)
+        self.edit_panel.rotation_changed.connect(self.queue.apply_rotation)
+        self.edit_panel.flip_changed.connect(self.queue.apply_flip)
+        self.edit_panel.format_changed.connect(lambda fmt: self.queue.update_format(fmt))
+        self.edit_panel.size_changed.connect(lambda size: self.queue.update_size(size))
+        self.edit_panel.compression_changed.connect(lambda v: self.queue.update_compression(v))
+        
     def add_images_to_queue(self, image_paths):
         for path in image_paths:
             self.queue.add_image(path)
     
     def process_images(self):
+        """Verarbeitet die Bilder in der Queue"""
         if self.queue.queue_list.count() == 0:
+            QMessageBox.warning(self, "Warnung", "Die Queue ist leer.")
             return
-            
-        # Ausgabeordner wählen
+
+        # Output-Verzeichnis wählen
         output_dir = QFileDialog.getExistingDirectory(
-            self, "Ausgabeordner wählen")
+            self,
+            "Ausgabeverzeichnis wählen",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
         if not output_dir:
             return
-            
-        # Dateinamen-Template
-        filename_template, ok = QInputDialog.getText(
-            self, 
-            "Dateinamen-Format",
-            "Gib ein Dateinamen-Template ein (z.B. optimized_{filename}):\n"
-            "{filename} wird durch den originalen Dateinamen ersetzt",
-            text="optimized_{filename}"
-        )
-        if not ok:
-            return
-        
+
         # Progress Dialog
         progress = QProgressDialog(
             "Verarbeite Bilder...", 
             "Abbrechen", 
             0, 
-            self.queue.queue_list.count(), 
+            self.queue.queue_list.count(),
             self
         )
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -216,20 +721,29 @@ class MainWindow(QMainWindow):
             if progress.wasCanceled():
                 break
             
-            input_path = self.queue.queue_list.item(i).text()
+            # Hole das aktuelle Item und Widget
+            item = self.queue.queue_list.item(i)
+            widget = self.queue.queue_list.itemWidget(item)
+            
+            if not widget or not widget.filepath:
+                continue
+            
+            input_path = widget.filepath
+            
+            if input_path not in self.queue.image_options:
+                print(f"Keine Optionen gefunden für: {input_path}")
+                continue
+            
             options = self.queue.image_options[input_path]
             
             # Ausgabedateiname erstellen
             original_filename = os.path.basename(input_path)
             name, _ = os.path.splitext(original_filename)
-            new_filename = filename_template.replace('{filename}', name)
-            output_path = os.path.join(
-                output_dir,
-                f"{new_filename}.{options['format'].lower()}"
-            )
+            new_filename = f"AD-{name}.{options['format'].lower()}"
+            output_path = os.path.join(output_dir, new_filename)
             
             # Bild verarbeiten
-            success, error = ImageProcessor.optimize_image(
+            success, error, _ = ImageProcessor.optimize_image(
                 input_path,
                 output_path,
                 options
@@ -242,17 +756,17 @@ class MainWindow(QMainWindow):
         
         progress.close()
         
-        # Ergebnisbericht
+        # Zeige Ergebnisse
         if failed_images:
-            error_msg = "Folgende Bilder konnten nicht verarbeitet werden:\n\n"
+            error_message = "Folgende Bilder konnten nicht verarbeitet werden:\n\n"
             for filename, error in failed_images:
-                error_msg += f"• {filename}: {error}\n"
-            QMessageBox.warning(self, "Fehler bei der Verarbeitung", error_msg)
+                error_message += f"- {filename}: {error}\n"
+            QMessageBox.warning(self, "Fehler bei der Verarbeitung", error_message)
         else:
             QMessageBox.information(
-                self,
-                "Erfolg",
-                f"Alle Bilder wurden erfolgreich verarbeitet und in\n{output_dir}\ngespeichert!"
+                self, 
+                "Verarbeitung abgeschlossen",
+                "Alle Bilder wurden erfolgreich verarbeitet."
             )
 
     def add_selected_to_queue(self):
@@ -281,6 +795,15 @@ class MainWindow(QMainWindow):
                 f"{added_count} Bilder zur Queue hinzugefügt.\n"
                 f"{already_in_queue} Bilder waren bereits in der Queue."
             )
+
+    def update_image_options(self, adjustments):
+        """Aktualisiert die Bildoptionen für ausgewählte Bilder in der Queue"""
+        for i in range(self.queue.queue_list.count()):
+            item = self.queue.queue_list.item(i)
+            if item.isSelected():
+                path = item.text()
+                if path in self.queue.image_options:
+                    self.queue.image_options[path]['adjustments'] = adjustments
 ```
 
 ### File: src\ui\preview_window.py
@@ -451,12 +974,13 @@ class ImageComparisonWidget(QWidget):
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QListWidget, QLabel, QDialog, QComboBox, 
                             QSpinBox, QFormLayout, QMessageBox, QMenu,
-                            QCheckBox, QSlider, QSizePolicy)
+                            QCheckBox, QSlider, QSizePolicy, QListWidgetItem)
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from .preview_window import ImageComparisonWidget
 from io import BytesIO
 from ..utils.image_processor import ImageProcessor
+from datetime import datetime, timedelta
 import os
 
 class GlobalOptionsDialog(QDialog):
@@ -525,26 +1049,100 @@ class GlobalOptionsDialog(QDialog):
         buttons_layout.addWidget(cancel_button)
         layout.addRow(buttons_layout)
 
+class ProcessingStats(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Statistik-Labels
+        self.current_file = QLabel("Aktuelle Datei: -")
+        self.progress = QLabel("Fortschritt: 0/0")
+        self.time_elapsed = QLabel("Vergangene Zeit: 00:00:00")
+        self.time_remaining = QLabel("Geschätzte Restzeit: --:--:--")
+        self.total_saved = QLabel("Gespeicherte Größe: 0 KB")
+        
+        for label in [self.current_file, self.progress, self.time_elapsed,
+                     self.time_remaining, self.total_saved]:
+            layout.addWidget(label)
+    
+    def update_stats(self, current_file, processed, total, start_time, saved_size):
+        self.current_file.setText(f"Aktuelle Datei: {os.path.basename(current_file)}")
+        self.progress.setText(f"Fortschritt: {processed}/{total}")
+        
+        elapsed = datetime.now() - start_time
+        self.time_elapsed.setText(f"Vergangene Zeit: {str(elapsed).split('.')[0]}")
+        
+        if processed > 0:
+            avg_time_per_file = elapsed.total_seconds() / processed
+            remaining_files = total - processed
+            estimated_remaining = timedelta(seconds=avg_time_per_file * remaining_files)
+            self.time_remaining.setText(f"Geschätzte Restzeit: {str(estimated_remaining).split('.')[0]}")
+        
+        self.total_saved.setText(f"Gespeicherte Größe: {saved_size/1024/1024:.1f} MB")
+
+class QueueListItem(QWidget):
+    def __init__(self, filepath, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 8, 8, 8)
+        layout.setSpacing(10)
+        
+        self.checkbox = QCheckBox()
+        self.label = QLabel(os.path.basename(filepath))
+        self.filepath = filepath
+        
+        self.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border-radius: 4px;
+            }
+            QLabel {
+                color: palette(text);
+                padding: 4px;
+            }
+            QCheckBox {
+                padding: 4px;
+            }
+        """)
+        
+        self.label.setToolTip(filepath)
+        
+        layout.addWidget(self.checkbox)
+        layout.addWidget(self.label, 1)
+        
+        self.setMinimumHeight(40)
+
 class QueuePanel(QWidget):
     process_started = pyqtSignal()
     
     def __init__(self):
         super().__init__()
-        self.init_ui()
         self.image_options = {}
-        self.global_options = {
+        self.current_preview_path = None
+        self.current_settings = {
             'format': 'WEBP',
             'width': 0,
             'height': 0,
-            'compression': 85
+            'compression': 85,
+            'adjustments': {
+                'brightness': 1.0,
+                'contrast': 1.0,
+                'saturation': 1.0
+            },
+            'rotation': 0,
+            'flip': None
         }
+        self.init_ui()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
-        # Header section with title and options
+        # Header section with title only (removed options button)
         header = QWidget()
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 5, 10, 5)
@@ -559,40 +1157,38 @@ class QueuePanel(QWidget):
             }
         """)
         header_layout.addWidget(title)
-        
-        # Options Button
-        self.options_btn = QPushButton("Globale Optionen")
-        self.options_btn.setStyleSheet("""
-            QPushButton {
-                color: palette(text);
-                background-color: palette(button);
-                padding: 6px 12px;
-                border: 1px solid palette(mid);
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: palette(midlight);
-            }
-        """)
-        header_layout.addWidget(self.options_btn)
         layout.addWidget(header)
         
-        # Queue List
+        # Toolbar über der Liste
+        queue_toolbar = QHBoxLayout()
+        self.select_all_btn = QPushButton("Alle auswählen")
+        self.select_all_btn.clicked.connect(self.toggle_select_all)
+        self.apply_to_selected_btn = QPushButton("Auf Ausgewählte anwenden")
+        self.apply_to_selected_btn.clicked.connect(self.apply_settings_to_selected)
+        
+        queue_toolbar.addWidget(self.select_all_btn)
+        queue_toolbar.addWidget(self.apply_to_selected_btn)
+        queue_toolbar.addStretch()
+        layout.addLayout(queue_toolbar)
+        
+        # Queue List mit Styling für mehr Abstand
         self.queue_list = QListWidget()
         self.queue_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid palette(mid);
                 border-radius: 4px;
                 background-color: palette(base);
-                color: palette(text);
+                padding: 2px;
             }
             QListWidget::item {
-                padding: 5px;
                 border-bottom: 1px solid palette(mid);
+                padding: 1px 4px;
+                margin: 2px 2px;
             }
             QListWidget::item:selected {
                 background-color: palette(highlight);
                 color: palette(highlighted-text);
+                border-radius: 3px;
             }
             QListWidget::item:hover {
                 background-color: palette(midlight);
@@ -600,7 +1196,17 @@ class QueuePanel(QWidget):
         """)
         self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_list.customContextMenuRequested.connect(self.show_context_menu)
+        self.queue_list.currentItemChanged.connect(self.update_preview)
         layout.addWidget(self.queue_list)
+        
+        # Vorschau-Widget
+        self.preview = ImageComparisonWidget()
+        self.preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        self.preview.setMinimumHeight(300)
+        layout.addWidget(self.preview)
         
         # Bottom toolbar with action buttons
         toolbar = QWidget()
@@ -650,21 +1256,8 @@ class QueuePanel(QWidget):
         layout.addWidget(toolbar)
         
         # Connect signals
-        self.options_btn.clicked.connect(self.show_global_options)
         self.remove_btn.clicked.connect(self.remove_selected)
         self.start_btn.clicked.connect(self.start_processing)
-        
-        # Vorschau-Widget hinzufügen
-        self.preview = ImageComparisonWidget()
-        self.preview.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding
-        )
-        self.preview.setMinimumHeight(300)  # Minimale Höhe setzen
-        layout.addWidget(self.preview)
-        
-        # Queue-Liste Auswahl verbinden
-        self.queue_list.currentItemChanged.connect(self.update_preview)
     
     def show_context_menu(self, position):
         menu = QMenu()
@@ -678,82 +1271,80 @@ class QueuePanel(QWidget):
         
         menu.exec(self.queue_list.mapToGlobal(position))
     
-    def add_image(self, image_path):
-        # Prüfen ob das Bild bereits in der Queue ist
+    def add_image(self, filepath):
+        """Fügt ein Bild zur Queue hinzu"""
+        if filepath not in [self.queue_list.itemWidget(self.queue_list.item(i)).filepath 
+                          for i in range(self.queue_list.count())]:
+            item = QListWidgetItem(self.queue_list)
+            widget = QueueListItem(filepath)
+            item.setSizeHint(widget.sizeHint())
+            self.queue_list.addItem(item)
+            self.queue_list.setItemWidget(item, widget)
+            
+            # Kopiere die aktuellen Einstellungen für dieses Bild
+            self.image_options[filepath] = self.get_current_settings()
+            return True
+        return False
+
+    def toggle_select_all(self):
+        """Wählt alle Bilder aus oder ab"""
+        select_all = self.select_all_btn.text() == "Alle auswählen"
         for i in range(self.queue_list.count()):
-            if self.queue_list.item(i).text() == image_path:
-                return False  # Bild bereits in der Queue
-        
-        self.queue_list.addItem(image_path)
-        self.image_options[image_path] = self.global_options.copy()
-        return True
-    
-    def remove_selected(self):
-        for item in self.queue_list.selectedItems():
-            path = item.text()
-            if path in self.image_options:
-                self.image_options.pop(path)
-            self.queue_list.takeItem(self.queue_list.row(item))
-    
-    def show_global_options(self):
-        dialog = GlobalOptionsDialog(self)
-        
-        # Aktuelle globale Optionen laden
-        dialog.format_combo.setCurrentText(self.global_options['format'])
-        dialog.width_spin.setValue(self.global_options['width'])
-        dialog.height_spin.setValue(self.global_options['height'])
-        dialog.compression_slider.setValue(self.global_options['compression'])
-        
-        # Verbinde Slider mit Live-Vorschau
-        dialog.compression_slider.valueChanged.connect(self.update_preview_compression)
-        
-        if dialog.exec():
-            new_options = {
-                'format': dialog.format_combo.currentText(),
-                'width': dialog.width_spin.value(),
-                'height': dialog.height_spin.value(),
-                'compression': dialog.compression_slider.value()
-            }
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            widget.checkbox.setChecked(select_all)
+        self.select_all_btn.setText("Alle abwählen" if select_all else "Alle auswählen")
+
+    def get_selected_files(self):
+        """Gibt eine Liste aller ausgewählten Dateien zurück"""
+        selected = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            if widget and widget.filepath and widget.checkbox.isChecked():
+                selected.append(widget.filepath)
+        return selected
+
+    def get_current_settings(self):
+        """Gibt die aktuellen Einstellungen zurück"""
+        return self.current_settings.copy()
+
+    def update_current_settings(self, settings_type, value):
+        """Aktualisiert die aktuellen Einstellungen"""
+        if isinstance(settings_type, dict):
+            self.current_settings.update(settings_type)
+        else:
+            if '.' in settings_type:
+                # Für verschachtelte Einstellungen wie 'adjustments.brightness'
+                main_key, sub_key = settings_type.split('.')
+                if main_key not in self.current_settings:
+                    self.current_settings[main_key] = {}
+                self.current_settings[main_key][sub_key] = value
+            else:
+                self.current_settings[settings_type] = value
+
+    def apply_settings_to_selected(self):
+        """Wendet die aktuellen Einstellungen auf alle ausgewählten Bilder an"""
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            QMessageBox.warning(self, "Warnung", 
+                              "Bitte wähle mindestens ein Bild aus.")
+            return
             
-            self.global_options = new_options
+        current_settings = self.get_current_settings()
+        
+        # Auf alle ausgewählten Bilder anwenden
+        for filepath in selected_files:
+            self.image_options[filepath].update(current_settings)
             
-            # Auf alle Bilder in der Queue anwenden
-            for i in range(self.queue_list.count()):
-                item = self.queue_list.item(i)
-                self.image_options[item.text()] = new_options.copy()
-            
-            # Aktualisiere die Vorschau mit den neuen Optionen
-            current_item = self.queue_list.currentItem()
-            if current_item:
-                self.update_preview(current_item, None)
-    
-    def update_preview_compression(self, value):
-        """Aktualisiert die Vorschau wenn sich die Kompression ändert"""
+        # Aktualisiere die Vorschau des aktuell ausgewählten Bildes
         current_item = self.queue_list.currentItem()
         if current_item:
-            # Temporär die Kompressionseinstellung ändern
-            temp_options = self.image_options[current_item.text()].copy()
-            temp_options['compression'] = value
+            self.update_preview(current_item, None)
             
-            # Vorschau mit temporären Optionen aktualisieren
-            input_path = current_item.text()
-            temp_output = BytesIO()
-            
-            success, _ = ImageProcessor.optimize_image(
-                input_path,
-                temp_output,
-                temp_options
-            )
-            
-            if success:
-                temp_output.seek(0)
-                processed_size = len(temp_output.getvalue()) / 1024
-                
-                temp_pixmap = QPixmap()
-                temp_pixmap.loadFromData(temp_output.getvalue())
-                
-                self.preview.set_images(input_path, temp_pixmap, processed_size)
-    
+        QMessageBox.information(self, "Erfolg", 
+                              f"Einstellungen auf {len(selected_files)} Bilder angewendet.")
+
     def start_processing(self):
         if self.queue_list.count() == 0:
             QMessageBox.warning(self, "Warnung", 
@@ -766,44 +1357,152 @@ class QueuePanel(QWidget):
         self.image_options.clear()
     
     def update_preview(self, current, previous):
-        """Aktualisiert die Vorschau wenn ein Bild in der Queue ausgewählt wird"""
+        """Wird aufgerufen, wenn ein neues Bild in der Queue ausgewählt wird"""
         if not current:
             self.preview.setVisible(False)
+            self.current_preview_path = None
             return
             
-        input_path = current.text()
-        print(f"Versuche Bild zu laden: {input_path}")  # Debug
+        widget = self.queue_list.itemWidget(current)
+        if not widget:
+            return
+
+        input_path = widget.filepath
+        self.current_preview_path = input_path
+        print(f"Versuche Bild zu laden: {input_path}")
         
+        # Lade die spezifischen Einstellungen für dieses Bild
+        if input_path in self.image_options:
+            # Verwende die gespeicherten Einstellungen für dieses Bild
+            self.update_preview_with_options(self.image_options[input_path])
+        else:
+            # Verwende die Standard-Einstellungen
+            self.image_options[input_path] = self.get_current_settings()
+            self.update_preview_with_options()
+
+    def update_preview_with_options(self, options=None):
+        """Aktualisiert die Vorschau mit den gegebenen Optionen"""
+        if not self.current_preview_path:
+            return
+            
+        current_item = self.queue_list.currentItem()
+        if not current_item:
+            return
+
+        widget = self.queue_list.itemWidget(current_item)
+        if not widget:
+            return
+
+        input_path = widget.filepath
+        self.current_preview_path = input_path
+        
+        # Wenn keine Optionen übergeben wurden, aktuelle Optionen verwenden
+        if options is None:
+            options = self.get_current_settings()
+        else:
+            # Optionen mit den bestehenden Optionen zusammenführen
+            current_options = self.get_current_settings()
+            current_options.update(options)
+            options = current_options
+
         # Temporäres verarbeitetes Bild erstellen
         temp_output = BytesIO()
-        options = self.image_options[input_path]
         
-        success, error = ImageProcessor.optimize_image(
+        success, error, stats = ImageProcessor.optimize_image(
             input_path,
             temp_output,
             options
         )
         
         if success:
-            print("Bildoptimierung erfolgreich")  # Debug
-            # BytesIO in QPixmap konvertieren
             temp_output.seek(0)
             processed_size = len(temp_output.getvalue()) / 1024  # KB
             
             temp_pixmap = QPixmap()
             success = temp_pixmap.loadFromData(temp_output.getvalue())
-            print(f"Pixmap geladen: {success}")  # Debug
             
             if not temp_pixmap.isNull():
-                print(f"Pixmap Größe: {temp_pixmap.width()}x{temp_pixmap.height()}")  # Debug
                 self.preview.set_images(input_path, temp_pixmap, processed_size)
                 self.preview.setVisible(True)
             else:
-                print("Fehler: Pixmap ist null")  # Debug
                 self.preview.setVisible(False)
         else:
-            print(f"Bildoptimierung fehlgeschlagen: {error}")  # Debug
+            print(f"Vorschau-Aktualisierung fehlgeschlagen: {error}")
             self.preview.setVisible(False)
+
+    def apply_adjustments(self, adjustments):
+        """Wendet neue Bildanpassungen auf die Vorschau an"""
+        self.update_current_settings('adjustments', adjustments)
+        self.update_preview_with_options({'adjustments': adjustments})
+
+    def apply_rotation(self, angle):
+        """Wendet neue Rotation auf die Vorschau an"""
+        self.update_current_settings('rotation', angle)
+        self.update_preview_with_options({'rotation': angle})
+
+    def apply_flip(self, flip_type):
+        """Wendet neue Spiegelung auf die Vorschau an"""
+        self.update_current_settings('flip', flip_type)
+        self.update_preview_with_options({'flip': flip_type})
+
+    def update_format(self, format):
+        """Aktualisiert das Format"""
+        self.update_current_settings('format', format)
+        self.update_preview_with_options({'format': format})
+
+    def update_size(self, size):
+        """Aktualisiert die Größeneinstellungen"""
+        self.update_current_settings('width', size.get('width', 0))
+        self.update_current_settings('height', size.get('height', 0))
+        self.update_preview_with_options(size)
+
+    def update_compression(self, value):
+        """Aktualisiert die Kompressionseinstellung"""
+        self.update_current_settings('compression', value)
+        self.update_preview_with_options({'compression': value})
+
+    def process_images(self):
+        """Verarbeitet alle Bilder in der Queue"""
+        # Entweder alle oder nur ausgewählte Bilder verarbeiten
+        files_to_process = self.get_selected_files()
+        if not files_to_process:  # Wenn keine ausgewählt, alle verarbeiten
+            files_to_process = [self.queue_list.itemWidget(
+                self.queue_list.item(i)).filepath 
+                for i in range(self.queue_list.count())]
+        
+        if not files_to_process:
+            QMessageBox.warning(self, "Warnung", "Die Queue ist leer.")
+            return
+            
+        # ... (Rest des Verarbeitungscodes) ...
+
+    def remove_selected(self):
+        """Entfernt ausgewählte Bilder aus der Queue"""
+        selected_files = self.get_selected_files()
+        if not selected_files:
+            QMessageBox.warning(self, "Warnung", 
+                              "Bitte wähle mindestens ein Bild aus.")
+            return
+
+        # Bilder aus der Queue und den Optionen entfernen
+        items_to_remove = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            widget = self.queue_list.itemWidget(item)
+            if widget and widget.filepath in selected_files:
+                items_to_remove.append(item)
+                if widget.filepath in self.image_options:
+                    del self.image_options[widget.filepath]
+
+        # Items aus der Liste entfernen
+        for item in items_to_remove:
+            self.queue_list.takeItem(self.queue_list.row(item))
+
+        # Vorschau aktualisieren falls nötig
+        if self.queue_list.count() == 0:
+            self.preview.setVisible(False)
+        elif not self.queue_list.currentItem():
+            self.queue_list.setCurrentRow(0)
 
 ```
 
@@ -925,8 +1624,8 @@ class ImageTile(QFrame):
     def enterEvent(self, event):
         if not self.selected:
             self.setStyleSheet("""
-                ImageTile {
-                    background-color: rgba(255, 68, 68, 0.1);  # Leichtes Rot beim Hover
+                QFrame {
+                    background-color: rgba(255, 68, 68, 0.1);
                     border-radius: 8px;
                 }
             """)
@@ -934,8 +1633,9 @@ class ImageTile(QFrame):
     def leaveEvent(self, event):
         if not self.selected:
             self.setStyleSheet("""
-                ImageTile {
+                QFrame {
                     background-color: transparent;
+                    border-radius: 8px;
                 }
             """)
 
@@ -1318,37 +2018,103 @@ class FlowLayout(QLayout):
 
 ### File: src\utils\image_processor.py
 ```
-from PIL import Image
+from PIL import Image, ImageEnhance
 import os
 import piexif
 from io import BytesIO
 import pillow_heif
+import time
+import logging
+
+# Logger Setup
+logging.basicConfig(
+    filename='image_processing.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # HEIF-Registrierung
 pillow_heif.register_heif_opener()
 
 class ImageProcessor:
     @staticmethod
+    def adjust_image(image, brightness=1.0, contrast=1.0, saturation=1.0):
+        """Passt Helligkeit, Kontrast und Sättigung des Bildes an"""
+        if brightness != 1.0:
+            enhancer = ImageEnhance.Brightness(image)
+            image = enhancer.enhance(brightness)
+        
+        if contrast != 1.0:
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(contrast)
+        
+        if saturation != 1.0:
+            enhancer = ImageEnhance.Color(image)
+            image = enhancer.enhance(saturation)
+        
+        return image
+
+    @staticmethod
+    def rotate_image(image, angle):
+        """Rotiert das Bild um den angegebenen Winkel"""
+        return image.rotate(angle, expand=True)
+
+    @staticmethod
+    def flip_image(image, horizontal=True):
+        """Spiegelt das Bild horizontal oder vertikal"""
+        if horizontal:
+            return image.transpose(Image.FLIP_LEFT_RIGHT)
+        return image.transpose(Image.FLIP_TOP_BOTTOM)
+
+    @staticmethod
+    def crop_image(image, box):
+        """Schneidet einen Bereich aus dem Bild aus"""
+        return image.crop(box)
+
+    @staticmethod
     def optimize_image(image_path, output_path, options):
-        """
-        Optimiert ein Bild mit den gegebenen Optionen.
-        """
+        start_time = time.time()
+        original_size = os.path.getsize(image_path)
+        
         try:
-            # Bild öffnen
+            logging.info(f"Starte Verarbeitung von: {image_path}")
             img = Image.open(image_path)
             
             # HEIC nach RGB konvertieren wenn nötig
             if img.format == 'HEIF':
                 img = img.convert('RGB')
             
-            # Größe anpassen wenn nötig
-            if options['width'] or options['height']:
-                img = ImageProcessor._resize_image(
-                    img, 
-                    options['width'], 
-                    options['height']
+            # Bildanpassungen anwenden
+            if 'adjustments' in options:
+                adj = options['adjustments']
+                img = ImageProcessor.adjust_image(
+                    img,
+                    brightness=adj.get('brightness', 1.0),
+                    contrast=adj.get('contrast', 1.0),
+                    saturation=adj.get('saturation', 1.0)
                 )
             
+            # Rotation anwenden
+            if 'rotation' in options and options['rotation']:
+                img = img.rotate(options['rotation'], expand=True)
+            
+            # Spiegelung anwenden
+            if 'flip' in options and options['flip']:
+                if options['flip'] == 'horizontal':
+                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                elif options['flip'] == 'vertical':
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            
+            # Größe anpassen wenn nötig
+            if options.get('width') or options.get('height'):
+                img = ImageProcessor._resize_image(
+                    img, 
+                    options.get('width', 0), 
+                    options.get('height', 0),
+                    options.get('width_unit', 'Pixel'),
+                    options.get('height_unit', 'Pixel')
+                )
+
             # Format bestimmen
             output_format = options['format'].upper()
             compression = options.get('compression', 85)
@@ -1411,24 +2177,61 @@ class ImageProcessor:
                     sizes=sizes
                 )
             
-            return True, None
-            
+            # Statistiken berechnen
+            end_time = time.time()
+            processing_time = end_time - start_time
+            final_size = os.path.getsize(output_path) if isinstance(output_path, str) else len(output_path.getvalue())
+            size_reduction = ((original_size - final_size) / original_size) * 100
+
+            stats = {
+                'processing_time': processing_time,
+                'original_size': original_size,
+                'final_size': final_size,
+                'size_reduction': size_reduction
+            }
+
+            logging.info(f"""
+                Verarbeitung abgeschlossen:
+                - Datei: {image_path}
+                - Verarbeitungszeit: {processing_time:.2f}s
+                - Größenreduzierung: {size_reduction:.1f}%
+                - Finale Größe: {final_size/1024:.1f}KB
+            """)
+
+            return True, None, stats
+
         except Exception as e:
-            return False, str(e)
+            logging.error(f"Fehler bei der Verarbeitung von {image_path}: {str(e)}")
+            return False, str(e), None
     
     @staticmethod
-    def _resize_image(img, width, height):
+    def _resize_image(img, width, height, unit="Pixel", keep_aspect=True):
         """
         Passt die Bildgröße unter Beibehaltung des Seitenverhältnisses an.
         """
         original_width, original_height = img.size
         
+        # Konvertiere Prozentangaben in Pixel
+        if unit == "%" and width > 0:
+            width = int(original_width * (width / 100))
+            height = int(original_height * (height / 100))
+        
+        # Wenn eine Dimension 0 ist oder Seitenverhältnis beibehalten werden soll
         if width and not height:
             ratio = width / original_width
             height = int(original_height * ratio)
         elif height and not width:
             ratio = height / original_height
             width = int(original_width * ratio)
+        elif not width and not height:
+            return img  # Originalgröße beibehalten
+        elif keep_aspect:
+            # Behalte das Seitenverhältnis bei, verwende die kleinere Dimension
+            ratio_w = width / original_width
+            ratio_h = height / original_height
+            ratio = min(ratio_w, ratio_h)
+            width = int(original_width * ratio)
+            height = int(original_height * ratio)
         
         # Hochwertige Größenanpassung
         return img.resize(

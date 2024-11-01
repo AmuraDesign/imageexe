@@ -139,9 +139,6 @@ class MainWindow(QMainWindow):
         if not output_dir:
             return
 
-        # Dateinamen-Template
-        filename_template = "{filename}"
-
         # Progress Dialog
         progress = QProgressDialog(
             "Verarbeite Bilder...", 
@@ -176,11 +173,8 @@ class MainWindow(QMainWindow):
             # Ausgabedateiname erstellen
             original_filename = os.path.basename(input_path)
             name, _ = os.path.splitext(original_filename)
-            new_filename = filename_template.replace('{filename}', name)
-            output_path = os.path.join(
-                output_dir,
-                f"{new_filename}.{options['format'].lower()}"
-            )
+            new_filename = f"AD-{name}.{options['format'].lower()}"
+            output_path = os.path.join(output_dir, new_filename)
             
             # Bild verarbeiten
             success, error, _ = ImageProcessor.optimize_image(

@@ -3,3 +3,4 @@ src\assets
 src\ui\__pycache__
 src\utils\__pycache__
 .ignorethese
+image_processing.log

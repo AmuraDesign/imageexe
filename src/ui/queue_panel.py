@@ -114,27 +114,33 @@ class QueueListItem(QWidget):
     def __init__(self, filepath, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setContentsMargins(4, 8, 8, 8)
         layout.setSpacing(10)
         
         self.checkbox = QCheckBox()
-        # Zeige nur den Dateinamen, nicht den ganzen Pfad
         self.label = QLabel(os.path.basename(filepath))
         self.filepath = filepath
         
-        # Styling für bessere Lesbarkeit
-        self.label.setStyleSheet("""
+        self.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border-radius: 4px;
+            }
             QLabel {
                 color: palette(text);
-                padding: 2px;
+                padding: 4px;
+            }
+            QCheckBox {
+                padding: 4px;
             }
         """)
         
-        # Tooltip mit vollständigem Pfad
         self.label.setToolTip(filepath)
         
         layout.addWidget(self.checkbox)
-        layout.addWidget(self.label, 1)  # 1 für stretch factor
+        layout.addWidget(self.label, 1)
+        
+        self.setMinimumHeight(40)
 
 class QueuePanel(QWidget):
     process_started = pyqtSignal()
@@ -192,19 +198,19 @@ class QueuePanel(QWidget):
         queue_toolbar.addStretch()
         layout.addLayout(queue_toolbar)
         
-        # Queue List mit Checkboxen
+        # Queue List mit Styling für mehr Abstand
         self.queue_list = QListWidget()
         self.queue_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid palette(mid);
                 border-radius: 4px;
                 background-color: palette(base);
-                padding: 5px;
+                padding: 2px;
             }
             QListWidget::item {
                 border-bottom: 1px solid palette(mid);
-                padding: 5px;
-                margin: 2px 0;
+                padding: 1px 4px;
+                margin: 2px 2px;
             }
             QListWidget::item:selected {
                 background-color: palette(highlight);

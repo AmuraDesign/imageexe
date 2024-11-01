@@ -1,8 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QSlider, QPushButton, QGroupBox, QComboBox, 
-                            QSpinBox, QFormLayout, QInputDialog)
+                            QSpinBox, QFormLayout, QInputDialog, QMessageBox, 
+                            QCheckBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon
+import os
+import json
 
 class EditPanel(QWidget):
     adjustments_changed = pyqtSignal(dict)
@@ -34,20 +37,49 @@ class EditPanel(QWidget):
         self.format_combo.currentTextChanged.connect(self.format_changed.emit)
         format_layout.addRow("Format:", self.format_combo)
         
+        # Größeneinstellungen Container
+        size_container = QWidget()
+        size_layout = QVBoxLayout(size_container)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Einheitenauswahl
+        unit_layout = QHBoxLayout()
+        self.size_unit = QComboBox()
+        self.size_unit.addItems(["Pixel", "%"])
+        self.size_unit.currentTextChanged.connect(self.on_unit_changed)
+        unit_layout.addWidget(QLabel("Einheit:"))
+        unit_layout.addWidget(self.size_unit)
+        unit_layout.addStretch()
+
+        # Checkbox für Seitenverhältnis
+        self.keep_aspect = QCheckBox("Seitenverhältnis beibehalten")
+        self.keep_aspect.setChecked(True)
+        unit_layout.addWidget(self.keep_aspect)
+
+        size_layout.addLayout(unit_layout)
+
         # Breite
+        width_layout = QHBoxLayout()
         self.width_spin = QSpinBox()
         self.width_spin.setRange(0, 10000)
         self.width_spin.setSpecialValueText("Original")
-        self.width_spin.valueChanged.connect(self.on_size_changed)
-        format_layout.addRow("Breite:", self.width_spin)
-        
+        self.width_spin.valueChanged.connect(self.on_width_changed)
+        width_layout.addWidget(QLabel("Breite:"))
+        width_layout.addWidget(self.width_spin)
+        size_layout.addLayout(width_layout)
+
         # Höhe
+        height_layout = QHBoxLayout()
         self.height_spin = QSpinBox()
         self.height_spin.setRange(0, 10000)
         self.height_spin.setSpecialValueText("Original")
-        self.height_spin.valueChanged.connect(self.on_size_changed)
-        format_layout.addRow("Höhe:", self.height_spin)
-        
+        self.height_spin.valueChanged.connect(self.on_height_changed)
+        height_layout.addWidget(QLabel("Höhe:"))
+        height_layout.addWidget(self.height_spin)
+        size_layout.addLayout(height_layout)
+
+        format_layout.addRow("Größe:", size_container)
+
         # Kompression mit angepasstem Stil
         compression_layout = QHBoxLayout()
         self.compression_slider = QSlider(Qt.Orientation.Horizontal)
@@ -72,14 +104,16 @@ class EditPanel(QWidget):
         """)
         self.compression_label = QLabel("85%")
         self.compression_slider.valueChanged.connect(
-            lambda v: (self.compression_label.setText(f"{v}%"),
-                      self.compression_changed.emit(v))
+            lambda v: (
+                self.compression_label.setText(f"{v}%"),
+                self.compression_changed.emit(v)
+            )
         )
         compression_layout.addWidget(QLabel("Kompression:"))
         compression_layout.addWidget(self.compression_slider)
         compression_layout.addWidget(self.compression_label)
-        format_layout.addRow("", compression_layout)  # Leeres Label für bessere Ausrichtung
-        
+        format_layout.addRow("", compression_layout)
+
         format_group.setLayout(format_layout)
         layout.addWidget(format_group)
 
@@ -205,9 +239,14 @@ class EditPanel(QWidget):
 
     def on_size_changed(self):
         """Wird aufgerufen, wenn sich die Größeneinstellungen ändern"""
+        if self.updating:
+            return
+            
         size = {
             'width': self.width_spin.value(),
-            'height': self.height_spin.value()
+            'height': self.height_spin.value(),
+            'unit': self.size_unit.currentText(),
+            'keep_aspect': self.keep_aspect.isChecked()
         }
         self.size_changed.emit(size)
 
@@ -217,6 +256,8 @@ class EditPanel(QWidget):
         self.format_combo.setCurrentText("WEBP")
         self.width_spin.setValue(0)
         self.height_spin.setValue(0)
+        self.size_unit.setCurrentText("Pixel")
+        self.keep_aspect.setChecked(True)
         self.compression_slider.setValue(85)
         
         # Bildanpassungen
@@ -260,10 +301,190 @@ class EditPanel(QWidget):
                 'flip_v': self.is_flipped_v
             }
             
-            # Speichern der Vorlage (z.B. in einer JSON-Datei)
-            self.save_template_to_file(name, template)
+            try:
+                # Erstelle templates Ordner, falls nicht vorhanden
+                templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+                os.makedirs(templates_dir, exist_ok=True)
+                
+                # Speichere Template als JSON
+                import json
+                template_path = os.path.join(templates_dir, f"{name}.json")
+                with open(template_path, 'w', encoding='utf-8') as f:
+                    json.dump(template, f, indent=4)
+                
+                QMessageBox.information(
+                    self,
+                    "Erfolg",
+                    f"Vorlage '{name}' wurde erfolgreich gespeichert."
+                )
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Fehler",
+                    f"Fehler beim Speichern der Vorlage: {str(e)}"
+                )
 
     def load_template(self):
         """Lädt eine gespeicherte Vorlage"""
-        # Implementierung des Template-Ladens
-        # ...
+        try:
+            # Template-Verzeichnis
+            templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+            if not os.path.exists(templates_dir):
+                QMessageBox.warning(
+                    self,
+                    "Keine Vorlagen",
+                    "Es wurden keine gespeicherten Vorlagen gefunden."
+                )
+                return
+
+            # Liste verfügbarer Templates
+            templates = [f for f in os.listdir(templates_dir) if f.endswith('.json')]
+            if not templates:
+                QMessageBox.warning(
+                    self,
+                    "Keine Vorlagen",
+                    "Es wurden keine gespeicherten Vorlagen gefunden."
+                )
+                return
+
+            # Template auswählen
+            template_name, ok = QInputDialog.getItem(
+                self,
+                "Vorlage laden",
+                "Wähle eine Vorlage:",
+                [os.path.splitext(t)[0] for t in templates],
+                0,
+                False
+            )
+
+            if ok and template_name:
+                # Template laden und anwenden
+                import json
+                template_path = os.path.join(templates_dir, f"{template_name}.json")
+                with open(template_path, 'r', encoding='utf-8') as f:
+                    template = json.load(f)
+
+                # Einstellungen anwenden
+                self.format_combo.setCurrentText(template['format'])
+                self.width_spin.setValue(template['width'])
+                self.height_spin.setValue(template['height'])
+                self.compression_slider.setValue(template['compression'])
+                
+                # Bildanpassungen
+                self.brightness_slider.setValue(template['adjustments']['brightness'])
+                self.contrast_slider.setValue(template['adjustments']['contrast'])
+                self.saturation_slider.setValue(template['adjustments']['saturation'])
+                
+                # Transformation
+                self.current_rotation = template['rotation']
+                self.is_flipped_h = template['flip_h']
+                self.is_flipped_v = template['flip_v']
+                
+                # UI aktualisieren
+                self.on_adjustment_changed()
+                self.on_size_changed()
+                self.rotation_changed.emit(self.current_rotation)
+                self.format_changed.emit(template['format'])
+                self.compression_changed.emit(template['compression'])
+                
+                # Flip-Button-Styles aktualisieren
+                self.flip_h_btn.setStyleSheet(
+                    "background-color: palette(highlight);" if self.is_flipped_h else ""
+                )
+                self.flip_v_btn.setStyleSheet(
+                    "background-color: palette(highlight);" if self.is_flipped_v else ""
+                )
+
+                QMessageBox.information(
+                    self,
+                    "Erfolg",
+                    f"Vorlage '{template_name}' wurde erfolgreich geladen."
+                )
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Fehler",
+                f"Fehler beim Laden der Vorlage: {str(e)}"
+            )
+
+    def update_spin_ranges(self):
+        """Aktualisiert die erlaubten Bereiche der Spinboxen basierend auf der gewählten Einheit"""
+        # Breite
+        if self.size_unit.currentText() == "%":
+            self.width_spin.setRange(0, 200)  # 0-200%
+            if self.width_spin.value() > 200:
+                self.width_spin.setValue(100)
+        else:
+            self.width_spin.setRange(0, 10000)  # 0-10000px
+        
+        # Höhe
+        if self.size_unit.currentText() == "%":
+            self.height_spin.setRange(0, 200)  # 0-200%
+            if self.height_spin.value() > 200:
+                self.height_spin.setValue(100)
+        else:
+            self.height_spin.setRange(0, 10000)  # 0-10000px
+
+    def on_unit_changed(self):
+        """Wird aufgerufen, wenn sich die Einheit ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        current_unit = self.size_unit.currentText()
+        
+        if current_unit == "Pixel":
+            self.width_spin.setRange(0, 10000)
+            self.height_spin.setRange(0, 10000)
+            if self.width_spin.value() > 0:
+                self.width_spin.setValue(int(self.width_spin.value() * self.original_width / 100))
+            if self.height_spin.value() > 0:
+                self.height_spin.setValue(int(self.height_spin.value() * self.original_height / 100))
+        else:  # Prozent
+            self.width_spin.setRange(0, 200)
+            self.height_spin.setRange(0, 200)
+            if self.width_spin.value() > 0:
+                self.width_spin.setValue(int(self.width_spin.value() * 100 / self.original_width))
+            if self.height_spin.value() > 0:
+                self.height_spin.setValue(int(self.height_spin.value() * 100 / self.original_height))
+        
+        self.updating = False
+        self.on_size_changed()
+
+    def on_width_changed(self):
+        """Wird aufgerufen, wenn sich die Breite ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        if self.keep_aspect.isChecked() and self.width_spin.value() > 0:
+            if self.size_unit.currentText() == "Pixel":
+                self.height_spin.setValue(int(self.width_spin.value() / self.aspect_ratio))
+            else:
+                self.height_spin.setValue(self.width_spin.value())
+        self.updating = False
+        self.on_size_changed()
+
+    def on_height_changed(self):
+        """Wird aufgerufen, wenn sich die Höhe ändert"""
+        if self.updating:
+            return
+            
+        self.updating = True
+        if self.keep_aspect.isChecked() and self.height_spin.value() > 0:
+            if self.size_unit.currentText() == "Pixel":
+                self.width_spin.setValue(int(self.height_spin.value() * self.aspect_ratio))
+            else:
+                self.width_spin.setValue(self.height_spin.value())
+        self.updating = False
+        self.on_size_changed()
+
+    def set_original_size(self, width, height):
+        """Setzt die Originalgröße des Bildes"""
+        self.original_width = width
+        self.original_height = height
+        self.aspect_ratio = width / height if height else 1.0
+        
+        # Aktualisiere die Ranges basierend auf der aktuellen Einheit
+        self.on_unit_changed()

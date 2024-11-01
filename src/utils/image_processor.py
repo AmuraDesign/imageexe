@@ -90,7 +90,9 @@ class ImageProcessor:
                 img = ImageProcessor._resize_image(
                     img, 
                     options.get('width', 0), 
-                    options.get('height', 0)
+                    options.get('height', 0),
+                    options.get('width_unit', 'Pixel'),
+                    options.get('height_unit', 'Pixel')
                 )
 
             # Format bestimmen
@@ -183,18 +185,33 @@ class ImageProcessor:
             return False, str(e), None
     
     @staticmethod
-    def _resize_image(img, width, height):
+    def _resize_image(img, width, height, unit="Pixel", keep_aspect=True):
         """
         Passt die Bildgröße unter Beibehaltung des Seitenverhältnisses an.
         """
         original_width, original_height = img.size
         
+        # Konvertiere Prozentangaben in Pixel
+        if unit == "%" and width > 0:
+            width = int(original_width * (width / 100))
+            height = int(original_height * (height / 100))
+        
+        # Wenn eine Dimension 0 ist oder Seitenverhältnis beibehalten werden soll
         if width and not height:
             ratio = width / original_width
             height = int(original_height * ratio)
         elif height and not width:
             ratio = height / original_height
             width = int(original_width * ratio)
+        elif not width and not height:
+            return img  # Originalgröße beibehalten
+        elif keep_aspect:
+            # Behalte das Seitenverhältnis bei, verwende die kleinere Dimension
+            ratio_w = width / original_width
+            ratio_h = height / original_height
+            ratio = min(ratio_w, ratio_h)
+            width = int(original_width * ratio)
+            height = int(original_height * ratio)
         
         # Hochwertige Größenanpassung
         return img.resize(
