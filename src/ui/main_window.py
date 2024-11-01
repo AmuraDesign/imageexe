@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QPushButton, QFileDialog, QMessageBox, 
-                           QInputDialog, QProgressDialog)
+                           QInputDialog, QProgressDialog, QApplication)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from .workspace import WorkspacePanel
@@ -15,21 +15,29 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Bildoptimierung")
         self.setMinimumSize(1200, 700)
         
-        # Allgemeines Styling für das Hauptfenster
+        # Modernes Windows 11 Styling
         self.setStyleSheet("""
             QMainWindow {
-                background-color: palette(window);
-                color: palette(text);
+                background-color: #f8f8f8;
             }
             QWidget {
-                background-color: palette(window);
-                color: palette(text);
+                font-family: 'Segoe UI', sans-serif;
             }
             QPushButton {
-                color: palette(text);
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #1484d7;
+            }
+            QPushButton:pressed {
+                background-color: #006cbd;
             }
             QLabel {
-                color: palette(text);
+                color: #000000;
             }
         """)
         
@@ -95,6 +103,7 @@ class MainWindow(QMainWindow):
                 background-color: palette(midlight);
             }
         """)
+        add_to_queue_btn.setObjectName("primaryButton")
         add_to_queue_btn.clicked.connect(self.add_selected_to_queue)
         middle_layout.addWidget(add_to_queue_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
@@ -117,6 +126,9 @@ class MainWindow(QMainWindow):
         self.edit_panel.format_changed.connect(lambda fmt: self.queue.update_format(fmt))
         self.edit_panel.size_changed.connect(lambda size: self.queue.update_size(size))
         self.edit_panel.compression_changed.connect(lambda v: self.queue.update_compression(v))
+        
+        # Theme detection
+        self.update_theme()
         
     def add_images_to_queue(self, image_paths):
         for path in image_paths:
@@ -238,3 +250,157 @@ class MainWindow(QMainWindow):
                 path = item.text()
                 if path in self.queue.image_options:
                     self.queue.image_options[path]['adjustments'] = adjustments
+
+    def update_theme(self):
+        """Updates the application theme based on system settings"""
+        app = QApplication.instance()
+        
+        if app.styleHints().colorScheme() == Qt.ColorScheme.Dark:
+            self.setStyleSheet("""
+                QMainWindow, QWidget {
+                    background-color: #202020;
+                    color: #ffffff;
+                    font-family: 'Segoe UI', sans-serif;
+                }
+                
+                QWidget[cssClass="section-panel"] {
+                    background-color: #2d2d2d;
+                    border-radius: 8px;
+                }
+                
+                QComboBox, QSpinBox {
+                    background-color: #2d2d2d;
+                    border: 1px solid #404040;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    color: #ffffff;
+                }
+                
+                QComboBox:hover, QSpinBox:hover {
+                    background-color: #363636;
+                    border-color: #60cdff;
+                }
+                
+                QPushButton {
+                    background-color: #2d2d2d;
+                    border: 1px solid #404040;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    color: #ffffff;
+                }
+                
+                QPushButton:hover {
+                    background-color: #363636;
+                    border-color: #60cdff;
+                }
+                
+                QPushButton[cssClass="accent"] {
+                    background-color: #0078d4;
+                    border: none;
+                    color: #ffffff;
+                }
+                
+                QPushButton[cssClass="accent"]:hover {
+                    background-color: #1484d7;
+                }
+                
+                QLabel[cssClass="section-title"] {
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+                
+                QCheckBox {
+                    color: #ffffff;
+                }
+                
+                QSlider::groove:horizontal {
+                    background: #404040;
+                    height: 4px;
+                    border-radius: 2px;
+                }
+                
+                QSlider::handle:horizontal {
+                    background: #60cdff;
+                    border: 2px solid #60cdff;
+                    width: 16px;
+                    height: 16px;
+                    margin: -6px 0;
+                    border-radius: 8px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QMainWindow, QWidget {
+                    background-color: #ffffff;
+                    color: #202020;
+                    font-family: 'Segoe UI', sans-serif;
+                }
+                
+                QWidget[cssClass="section-panel"] {
+                    background-color: #ffffff;
+                    border-radius: 8px;
+                    border: 1px solid #e0e0e0;
+                }
+                
+                QComboBox, QSpinBox {
+                    background-color: #ffffff;
+                    border: 1px solid #d1d1d1;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    color: #202020;
+                }
+                
+                QComboBox:hover, QSpinBox:hover {
+                    background-color: #f5f5f5;
+                    border-color: #0078d4;
+                }
+                
+                QPushButton {
+                    background-color: #ffffff;
+                    border: 1px solid #d1d1d1;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    color: #202020;
+                }
+                
+                QPushButton:hover {
+                    background-color: #f5f5f5;
+                    border-color: #0078d4;
+                }
+                
+                QPushButton[cssClass="accent"] {
+                    background-color: #0078d4;
+                    border: none;
+                    color: #ffffff;
+                }
+                
+                QPushButton[cssClass="accent"]:hover {
+                    background-color: #1484d7;
+                }
+                
+                QLabel[cssClass="section-title"] {
+                    color: #202020;
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+                
+                QCheckBox {
+                    color: #202020;
+                }
+                
+                QSlider::groove:horizontal {
+                    background: #e0e0e0;
+                    height: 4px;
+                    border-radius: 2px;
+                }
+                
+                QSlider::handle:horizontal {
+                    background: #0078d4;
+                    border: 2px solid #0078d4;
+                    width: 16px;
+                    height: 16px;
+                    margin: -6px 0;
+                    border-radius: 8px;
+                }
+            """)

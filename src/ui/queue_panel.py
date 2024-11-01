@@ -166,9 +166,45 @@ class QueuePanel(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
+
+        # Modernes Styling
+        self.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: white;
+                padding: 8px;
+            }
+            QListWidget::item {
+                border-bottom: 1px solid #f0f0f0;
+                padding: 8px;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #e5f3ff;
+                color: #000000;
+            }
+            QListWidget::item:hover {
+                background-color: #f5f5f5;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #1484d7;
+            }
+            QPushButton:pressed {
+                background-color: #006cbd;
+            }
+        """)
+
         # Header section with title only (removed options button)
         header = QWidget()
         header_layout = QHBoxLayout(header)

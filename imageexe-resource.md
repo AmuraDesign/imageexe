@@ -91,6 +91,10 @@ class EditPanel(QWidget):
         self.current_rotation = 0
         self.is_flipped_h = False
         self.is_flipped_v = False
+        self.updating = False
+        self.original_width = 0
+        self.original_height = 0
+        self.aspect_ratio = 1.0
         self.init_ui()
         
     def init_ui(self):
@@ -1454,7 +1458,16 @@ class QueuePanel(QWidget):
         """Aktualisiert die Größeneinstellungen"""
         self.update_current_settings('width', size.get('width', 0))
         self.update_current_settings('height', size.get('height', 0))
-        self.update_preview_with_options(size)
+        # Füge die Einheit zu den Einstellungen hinzu
+        self.update_current_settings('width_unit', size.get('unit', 'Pixel'))
+        self.update_current_settings('height_unit', size.get('unit', 'Pixel'))
+        self.update_preview_with_options({
+            'width': size.get('width', 0),
+            'height': size.get('height', 0),
+            'width_unit': size.get('unit', 'Pixel'),
+            'height_unit': size.get('unit', 'Pixel'),
+            'keep_aspect': size.get('keep_aspect', True)
+        })
 
     def update_compression(self, value):
         """Aktualisiert die Kompressionseinstellung"""
@@ -2112,7 +2125,7 @@ class ImageProcessor:
                     options.get('width', 0), 
                     options.get('height', 0),
                     options.get('width_unit', 'Pixel'),
-                    options.get('height_unit', 'Pixel')
+                    options.get('keep_aspect', True)
                 )
 
             # Format bestimmen
@@ -2211,10 +2224,17 @@ class ImageProcessor:
         """
         original_width, original_height = img.size
         
+        # Debug-Ausgabe
+        print(f"Resize with: width={width}, height={height}, unit={unit}")
+        
         # Konvertiere Prozentangaben in Pixel
-        if unit == "%" and width > 0:
-            width = int(original_width * (width / 100))
-            height = int(original_height * (height / 100))
+        if unit == "%":
+            if width > 0:
+                width = int(original_width * (width / 100))
+                print(f"Converted width to pixels: {width}")
+            if height > 0:
+                height = int(original_height * (height / 100))
+                print(f"Converted height to pixels: {height}")
         
         # Wenn eine Dimension 0 ist oder Seitenverhältnis beibehalten werden soll
         if width and not height:
@@ -2232,6 +2252,8 @@ class ImageProcessor:
             ratio = min(ratio_w, ratio_h)
             width = int(original_width * ratio)
             height = int(original_height * ratio)
+        
+        print(f"Final resize dimensions: {width}x{height}")
         
         # Hochwertige Größenanpassung
         return img.resize(

@@ -67,12 +67,7 @@ class ImageProcessor:
             # Bildanpassungen anwenden
             if 'adjustments' in options:
                 adj = options['adjustments']
-                img = ImageProcessor.adjust_image(
-                    img,
-                    brightness=adj.get('brightness', 1.0),
-                    contrast=adj.get('contrast', 1.0),
-                    saturation=adj.get('saturation', 1.0)
-                )
+                img = ImageProcessor.apply_adjustments(img, adj)
             
             # Rotation anwenden
             if 'rotation' in options and options['rotation']:
@@ -255,3 +250,17 @@ class ImageProcessor:
             return "Mittel"
         else:
             return "Hoch"
+
+    @staticmethod
+    def apply_adjustments(image, adjustments):
+        """Wendet Bildanpassungen mit korrekter Normalisierung an"""
+        if adjustments.get('brightness', 1.0) != 1.0:
+            image = ImageEnhance.Brightness(image).enhance(adjustments['brightness'])
+        
+        if adjustments.get('contrast', 1.0) != 1.0:
+            image = ImageEnhance.Contrast(image).enhance(adjustments['contrast'])
+        
+        if adjustments.get('saturation', 1.0) != 1.0:
+            image = ImageEnhance.Color(image).enhance(adjustments['saturation'])
+        
+        return image
