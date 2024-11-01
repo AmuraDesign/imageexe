@@ -20,6 +20,10 @@ class EditPanel(QWidget):
         self.current_rotation = 0
         self.is_flipped_h = False
         self.is_flipped_v = False
+        self.updating = False
+        self.original_width = 0
+        self.original_height = 0
+        self.aspect_ratio = 1.0
         self.init_ui()
         
     def init_ui(self):

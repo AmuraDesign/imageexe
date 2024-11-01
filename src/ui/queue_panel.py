@@ -481,7 +481,16 @@ class QueuePanel(QWidget):
         """Aktualisiert die Größeneinstellungen"""
         self.update_current_settings('width', size.get('width', 0))
         self.update_current_settings('height', size.get('height', 0))
-        self.update_preview_with_options(size)
+        # Füge die Einheit zu den Einstellungen hinzu
+        self.update_current_settings('width_unit', size.get('unit', 'Pixel'))
+        self.update_current_settings('height_unit', size.get('unit', 'Pixel'))
+        self.update_preview_with_options({
+            'width': size.get('width', 0),
+            'height': size.get('height', 0),
+            'width_unit': size.get('unit', 'Pixel'),
+            'height_unit': size.get('unit', 'Pixel'),
+            'keep_aspect': size.get('keep_aspect', True)
+        })
 
     def update_compression(self, value):
         """Aktualisiert die Kompressionseinstellung"""
