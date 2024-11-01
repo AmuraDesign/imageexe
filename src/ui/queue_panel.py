@@ -1,9 +1,13 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QListWidget, QLabel, QDialog, QComboBox, 
                             QSpinBox, QFormLayout, QMessageBox, QMenu,
-                            QCheckBox, QSlider)
+                            QCheckBox, QSlider, QSizePolicy)
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon, QPixmap
+from .preview_window import ImageComparisonWidget
+from io import BytesIO
+from ..utils.image_processor import ImageProcessor
+import os
 
 class GlobalOptionsDialog(QDialog):
     def __init__(self, parent=None):
@@ -199,6 +203,18 @@ class QueuePanel(QWidget):
         self.options_btn.clicked.connect(self.show_global_options)
         self.remove_btn.clicked.connect(self.remove_selected)
         self.start_btn.clicked.connect(self.start_processing)
+        
+        # Vorschau-Widget hinzufügen
+        self.preview = ImageComparisonWidget()
+        self.preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        self.preview.setMinimumHeight(300)  # Minimale Höhe setzen
+        layout.addWidget(self.preview)
+        
+        # Queue-Liste Auswahl verbinden
+        self.queue_list.currentItemChanged.connect(self.update_preview)
     
     def show_context_menu(self, position):
         menu = QMenu()
@@ -238,12 +254,15 @@ class QueuePanel(QWidget):
         dialog.height_spin.setValue(self.global_options['height'])
         dialog.compression_slider.setValue(self.global_options['compression'])
         
+        # Verbinde Slider mit Live-Vorschau
+        dialog.compression_slider.valueChanged.connect(self.update_preview_compression)
+        
         if dialog.exec():
             new_options = {
                 'format': dialog.format_combo.currentText(),
                 'width': dialog.width_spin.value(),
                 'height': dialog.height_spin.value(),
-                'compression': dialog.compression_slider.value()  # Numerischer Wert
+                'compression': dialog.compression_slider.value()
             }
             
             self.global_options = new_options
@@ -252,6 +271,38 @@ class QueuePanel(QWidget):
             for i in range(self.queue_list.count()):
                 item = self.queue_list.item(i)
                 self.image_options[item.text()] = new_options.copy()
+            
+            # Aktualisiere die Vorschau mit den neuen Optionen
+            current_item = self.queue_list.currentItem()
+            if current_item:
+                self.update_preview(current_item, None)
+    
+    def update_preview_compression(self, value):
+        """Aktualisiert die Vorschau wenn sich die Kompression ändert"""
+        current_item = self.queue_list.currentItem()
+        if current_item:
+            # Temporär die Kompressionseinstellung ändern
+            temp_options = self.image_options[current_item.text()].copy()
+            temp_options['compression'] = value
+            
+            # Vorschau mit temporären Optionen aktualisieren
+            input_path = current_item.text()
+            temp_output = BytesIO()
+            
+            success, _ = ImageProcessor.optimize_image(
+                input_path,
+                temp_output,
+                temp_options
+            )
+            
+            if success:
+                temp_output.seek(0)
+                processed_size = len(temp_output.getvalue()) / 1024
+                
+                temp_pixmap = QPixmap()
+                temp_pixmap.loadFromData(temp_output.getvalue())
+                
+                self.preview.set_images(input_path, temp_pixmap, processed_size)
     
     def start_processing(self):
         if self.queue_list.count() == 0:
@@ -263,3 +314,43 @@ class QueuePanel(QWidget):
     def clear_queue(self):
         self.queue_list.clear()
         self.image_options.clear()
+    
+    def update_preview(self, current, previous):
+        """Aktualisiert die Vorschau wenn ein Bild in der Queue ausgewählt wird"""
+        if not current:
+            self.preview.setVisible(False)
+            return
+            
+        input_path = current.text()
+        print(f"Versuche Bild zu laden: {input_path}")  # Debug
+        
+        # Temporäres verarbeitetes Bild erstellen
+        temp_output = BytesIO()
+        options = self.image_options[input_path]
+        
+        success, error = ImageProcessor.optimize_image(
+            input_path,
+            temp_output,
+            options
+        )
+        
+        if success:
+            print("Bildoptimierung erfolgreich")  # Debug
+            # BytesIO in QPixmap konvertieren
+            temp_output.seek(0)
+            processed_size = len(temp_output.getvalue()) / 1024  # KB
+            
+            temp_pixmap = QPixmap()
+            success = temp_pixmap.loadFromData(temp_output.getvalue())
+            print(f"Pixmap geladen: {success}")  # Debug
+            
+            if not temp_pixmap.isNull():
+                print(f"Pixmap Größe: {temp_pixmap.width()}x{temp_pixmap.height()}")  # Debug
+                self.preview.set_images(input_path, temp_pixmap, processed_size)
+                self.preview.setVisible(True)
+            else:
+                print("Fehler: Pixmap ist null")  # Debug
+                self.preview.setVisible(False)
+        else:
+            print(f"Bildoptimierung fehlgeschlagen: {error}")  # Debug
+            self.preview.setVisible(False)

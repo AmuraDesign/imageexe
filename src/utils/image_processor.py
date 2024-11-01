@@ -29,13 +29,29 @@ class ImageProcessor:
                     options['height']
                 )
             
-            # Format konvertieren und speichern
+            # Format bestimmen
             output_format = options['format'].upper()
             compression = options.get('compression', 85)
             quality = 100 - compression
             
-            if output_format == 'JPEG':
-                # Für JPEG: RGB-Modus erzwingen
+            # Wenn gleiches Format wie Original, dann Format aus Originaldatei verwenden
+            if output_format == img.format:
+                output_format = img.format
+            # Sonst Format aus den Optionen verwenden und normalisieren
+            elif output_format in ['JPEG', 'JPG']:
+                output_format = 'JPEG'
+            elif output_format == 'WEBP':
+                output_format = 'WEBP'
+            elif output_format == 'PNG':
+                output_format = 'PNG'
+            elif output_format == 'ICO':
+                output_format = 'ICO'
+            else:
+                # Fallback auf JPEG wenn Format unbekannt
+                output_format = 'JPEG'
+            
+            # Speichern mit entsprechendem Format
+            if output_format in ['JPEG', 'JPG']:
                 if img.mode in ('RGBA', 'LA'):
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[-1])
@@ -43,6 +59,7 @@ class ImageProcessor:
                 
                 img.save(
                     output_path,
+                    format=output_format,
                     quality=quality,
                     optimize=True
                 )
@@ -58,7 +75,6 @@ class ImageProcessor:
                 )
             
             elif output_format == 'PNG':
-                # PNG verwendet 0-9 Skala, 9 = maximale Kompression
                 png_compression = int(compression / 11)
                 img.save(
                     output_path,

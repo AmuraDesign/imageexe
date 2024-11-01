@@ -14,10 +14,12 @@ Directory of every file in the project
 - File: src\assets\icons\start.png (not included in output)
 - Directory: src\ui
 - File: src\ui\main_window.py
+- File: src\ui\preview_window.py
 - File: src\ui\queue_panel.py
 - File: src\ui\workspace.py
 - Directory: src\ui\__pycache__ (not included in output)
 - File: src\ui\__pycache__\main_window.cpython-312.pyc (not included in output)
+- File: src\ui\__pycache__\preview_window.cpython-312.pyc (not included in output)
 - File: src\ui\__pycache__\queue_panel.cpython-312.pyc (not included in output)
 - File: src\ui\__pycache__\workspace.cpython-312.pyc (not included in output)
 - Directory: src\utils
@@ -281,14 +283,181 @@ class MainWindow(QMainWindow):
             )
 ```
 
+### File: src\ui\preview_window.py
+```
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                            QSlider, QPushButton, QFrame, QSizePolicy)
+from PyQt6.QtCore import Qt, QSize, QRect, QPoint
+from PyQt6.QtGui import QPixmap, QPainter, QColor
+from PIL import Image
+from io import BytesIO
+import os
+
+class ImageComparisonWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.original_pixmap = None
+        self.processed_pixmap = None
+        self.slider_position = 50
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Container für die Bildvorschau
+        self.image_container = QFrame()
+        self.image_container.setStyleSheet("""
+            QFrame {
+                background-color: #2a2a2a;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+            }
+        """)
+        self.image_container.setMinimumSize(400, 300)
+        self.image_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        # Überschreibe paintEvent des Containers
+        self.image_container.paintEvent = self.container_paint_event
+        
+        # Info-Labels
+        info_layout = QHBoxLayout()
+        self.original_info = QLabel("Original: --")
+        self.processed_info = QLabel("Optimiert: --")
+        info_layout.addWidget(self.original_info)
+        info_layout.addStretch()
+        info_layout.addWidget(self.processed_info)
+        
+        # Schieberegler mit angepasstem Style
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(50)
+        self.slider.valueChanged.connect(self.update_comparison)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ff4444, stop:1 #44ff44);
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                border: 1px solid #999999;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+        """)
+        
+        # Label für Slider-Position
+        self.slider_label = QLabel("50%")
+        self.slider.valueChanged.connect(
+            lambda v: self.slider_label.setText(f"{v}%")
+        )
+        
+        # Slider-Layout mit Label
+        slider_layout = QHBoxLayout()
+        slider_layout.addWidget(self.slider)
+        slider_layout.addWidget(self.slider_label)
+        
+        # Layout zusammensetzen
+        main_layout.addWidget(self.image_container, stretch=1)
+        main_layout.addLayout(info_layout)
+        main_layout.addLayout(slider_layout)
+
+    def container_paint_event(self, event):
+        """Paint-Event für den Container"""
+        if not self.original_pixmap or not self.processed_pixmap:
+            return
+            
+        painter = QPainter(self.image_container)
+        container_rect = self.image_container.rect()
+        
+        # Bilder auf Container-Größe skalieren
+        scaled_original = self.original_pixmap.scaled(
+            container_rect.width(),
+            container_rect.height(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        scaled_processed = self.processed_pixmap.scaled(
+            container_rect.width(),
+            container_rect.height(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        
+        # Berechne zentrierte Position
+        x_offset = (container_rect.width() - scaled_original.width()) // 2
+        y_offset = (container_rect.height() - scaled_original.height()) // 2
+        
+        # Berechne Split-Position
+        split_pos = int(scaled_original.width() * (self.slider_position / 100))
+        
+        # Zeichne Original (links)
+        painter.drawPixmap(
+            QRect(x_offset, y_offset, split_pos, scaled_original.height()),
+            scaled_original,
+            QRect(0, 0, split_pos, scaled_original.height())
+        )
+        
+        # Zeichne verarbeitetes Bild (rechts)
+        painter.drawPixmap(
+            QRect(x_offset + split_pos, y_offset, 
+                 scaled_processed.width() - split_pos, scaled_processed.height()),
+            scaled_processed,
+            QRect(split_pos, 0, scaled_processed.width() - split_pos, scaled_processed.height())
+        )
+        
+        # Zeichne Trennlinie
+        pen = painter.pen()
+        pen.setColor(QColor(255, 255, 255))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawLine(
+            x_offset + split_pos, y_offset,
+            x_offset + split_pos, y_offset + scaled_original.height()
+        )
+
+    def update_comparison(self):
+        """Aktualisiert die Vorschau basierend auf Schieberposition"""
+        self.slider_position = self.slider.value()
+        self.image_container.update()  # Nur Container neu zeichnen
+
+    def set_images(self, original_path, processed_pixmap, processed_size):
+        """Lädt Original- und verarbeitetes Bild"""
+        self.original_pixmap = QPixmap(original_path)
+        self.processed_pixmap = processed_pixmap
+        
+        # Größeninformationen aktualisieren
+        original_size = os.path.getsize(original_path) / 1024  # KB
+        reduction = ((original_size - processed_size) / original_size) * 100
+        
+        self.original_info.setText(f"Original: {original_size:.1f} KB")
+        self.processed_info.setText(
+            f"Optimiert: {processed_size:.1f} KB (-{reduction:.1f}%)")
+        
+        self.image_container.update()
+
+```
+
 ### File: src\ui\queue_panel.py
 ```
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QListWidget, QLabel, QDialog, QComboBox, 
                             QSpinBox, QFormLayout, QMessageBox, QMenu,
-                            QCheckBox, QSlider)
+                            QCheckBox, QSlider, QSizePolicy)
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon, QPixmap
+from .preview_window import ImageComparisonWidget
+from io import BytesIO
+from ..utils.image_processor import ImageProcessor
+import os
 
 class GlobalOptionsDialog(QDialog):
     def __init__(self, parent=None):
@@ -484,6 +653,18 @@ class QueuePanel(QWidget):
         self.options_btn.clicked.connect(self.show_global_options)
         self.remove_btn.clicked.connect(self.remove_selected)
         self.start_btn.clicked.connect(self.start_processing)
+        
+        # Vorschau-Widget hinzufügen
+        self.preview = ImageComparisonWidget()
+        self.preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding
+        )
+        self.preview.setMinimumHeight(300)  # Minimale Höhe setzen
+        layout.addWidget(self.preview)
+        
+        # Queue-Liste Auswahl verbinden
+        self.queue_list.currentItemChanged.connect(self.update_preview)
     
     def show_context_menu(self, position):
         menu = QMenu()
@@ -523,12 +704,15 @@ class QueuePanel(QWidget):
         dialog.height_spin.setValue(self.global_options['height'])
         dialog.compression_slider.setValue(self.global_options['compression'])
         
+        # Verbinde Slider mit Live-Vorschau
+        dialog.compression_slider.valueChanged.connect(self.update_preview_compression)
+        
         if dialog.exec():
             new_options = {
                 'format': dialog.format_combo.currentText(),
                 'width': dialog.width_spin.value(),
                 'height': dialog.height_spin.value(),
-                'compression': dialog.compression_slider.value()  # Numerischer Wert
+                'compression': dialog.compression_slider.value()
             }
             
             self.global_options = new_options
@@ -537,6 +721,38 @@ class QueuePanel(QWidget):
             for i in range(self.queue_list.count()):
                 item = self.queue_list.item(i)
                 self.image_options[item.text()] = new_options.copy()
+            
+            # Aktualisiere die Vorschau mit den neuen Optionen
+            current_item = self.queue_list.currentItem()
+            if current_item:
+                self.update_preview(current_item, None)
+    
+    def update_preview_compression(self, value):
+        """Aktualisiert die Vorschau wenn sich die Kompression ändert"""
+        current_item = self.queue_list.currentItem()
+        if current_item:
+            # Temporär die Kompressionseinstellung ändern
+            temp_options = self.image_options[current_item.text()].copy()
+            temp_options['compression'] = value
+            
+            # Vorschau mit temporären Optionen aktualisieren
+            input_path = current_item.text()
+            temp_output = BytesIO()
+            
+            success, _ = ImageProcessor.optimize_image(
+                input_path,
+                temp_output,
+                temp_options
+            )
+            
+            if success:
+                temp_output.seek(0)
+                processed_size = len(temp_output.getvalue()) / 1024
+                
+                temp_pixmap = QPixmap()
+                temp_pixmap.loadFromData(temp_output.getvalue())
+                
+                self.preview.set_images(input_path, temp_pixmap, processed_size)
     
     def start_processing(self):
         if self.queue_list.count() == 0:
@@ -548,6 +764,46 @@ class QueuePanel(QWidget):
     def clear_queue(self):
         self.queue_list.clear()
         self.image_options.clear()
+    
+    def update_preview(self, current, previous):
+        """Aktualisiert die Vorschau wenn ein Bild in der Queue ausgewählt wird"""
+        if not current:
+            self.preview.setVisible(False)
+            return
+            
+        input_path = current.text()
+        print(f"Versuche Bild zu laden: {input_path}")  # Debug
+        
+        # Temporäres verarbeitetes Bild erstellen
+        temp_output = BytesIO()
+        options = self.image_options[input_path]
+        
+        success, error = ImageProcessor.optimize_image(
+            input_path,
+            temp_output,
+            options
+        )
+        
+        if success:
+            print("Bildoptimierung erfolgreich")  # Debug
+            # BytesIO in QPixmap konvertieren
+            temp_output.seek(0)
+            processed_size = len(temp_output.getvalue()) / 1024  # KB
+            
+            temp_pixmap = QPixmap()
+            success = temp_pixmap.loadFromData(temp_output.getvalue())
+            print(f"Pixmap geladen: {success}")  # Debug
+            
+            if not temp_pixmap.isNull():
+                print(f"Pixmap Größe: {temp_pixmap.width()}x{temp_pixmap.height()}")  # Debug
+                self.preview.set_images(input_path, temp_pixmap, processed_size)
+                self.preview.setVisible(True)
+            else:
+                print("Fehler: Pixmap ist null")  # Debug
+                self.preview.setVisible(False)
+        else:
+            print(f"Bildoptimierung fehlgeschlagen: {error}")  # Debug
+            self.preview.setVisible(False)
 
 ```
 
@@ -1093,13 +1349,29 @@ class ImageProcessor:
                     options['height']
                 )
             
-            # Format konvertieren und speichern
+            # Format bestimmen
             output_format = options['format'].upper()
             compression = options.get('compression', 85)
             quality = 100 - compression
             
-            if output_format == 'JPEG':
-                # Für JPEG: RGB-Modus erzwingen
+            # Wenn gleiches Format wie Original, dann Format aus Originaldatei verwenden
+            if output_format == img.format:
+                output_format = img.format
+            # Sonst Format aus den Optionen verwenden und normalisieren
+            elif output_format in ['JPEG', 'JPG']:
+                output_format = 'JPEG'
+            elif output_format == 'WEBP':
+                output_format = 'WEBP'
+            elif output_format == 'PNG':
+                output_format = 'PNG'
+            elif output_format == 'ICO':
+                output_format = 'ICO'
+            else:
+                # Fallback auf JPEG wenn Format unbekannt
+                output_format = 'JPEG'
+            
+            # Speichern mit entsprechendem Format
+            if output_format in ['JPEG', 'JPG']:
                 if img.mode in ('RGBA', 'LA'):
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[-1])
@@ -1107,6 +1379,7 @@ class ImageProcessor:
                 
                 img.save(
                     output_path,
+                    format=output_format,
                     quality=quality,
                     optimize=True
                 )
@@ -1122,7 +1395,6 @@ class ImageProcessor:
                 )
             
             elif output_format == 'PNG':
-                # PNG verwendet 0-9 Skala, 9 = maximale Kompression
                 png_compression = int(compression / 11)
                 img.save(
                     output_path,
